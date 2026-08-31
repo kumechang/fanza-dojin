@@ -25,11 +25,13 @@ export function computePostingProbability(ctx: PostingProbabilityContext): numbe
 }
 
 // このアカウントの投稿可能時間帯のうち、今の時刻(含む)から終了時刻までに残っているアクティブ時間数。
-// shouldGenerateReplyNow.tsからも再利用する。
+// startHour > endHour(日をまたぐ時間帯、例: 22時〜翌2時)の場合、まだ日をまたいでいない
+// (currentHourがstartHour以降)ならendHourを+24時間分先とみなして計算する。
 export function countRemainingActiveHours(now: Date, config: AppConfig): number {
   const currentHour = getJstHour(now);
-  const { endHour } = config.postingWindow;
-  return Math.max(1, endHour - currentHour);
+  const { startHour, endHour } = config.postingWindow;
+  const effectiveEndHour = startHour > endHour && currentHour >= startHour ? endHour + 24 : endHour;
+  return Math.max(1, effectiveEndHour - currentHour);
 }
 
 // 実際に今回generate-postsで投稿候補を作るべきかどうかを判定する。

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { describe, it, expect, beforeEach } from "vitest";
-import { computePostingProbability, shouldGenerateNow } from "../src/pipeline/shouldGenerateNow.js";
+import { computePostingProbability, countRemainingActiveHours, shouldGenerateNow } from "../src/pipeline/shouldGenerateNow.js";
 import type { AppConfig } from "../src/config/types.js";
 
 describe("computePostingProbability", () => {
@@ -48,6 +48,20 @@ describe("computePostingProbability", () => {
     expect(
       computePostingProbability({ remainingTarget: 10, remainingActiveHours: 2, hourWeight: 5, averageWeight: 1 })
     ).toBe(1);
+  });
+});
+
+describe("countRemainingActiveHours (overnight window, startHour > endHour)", () => {
+  const config = { postingWindow: { startHour: 22, endHour: 2 } } as AppConfig;
+
+  it("counts across midnight when still before it", () => {
+    // JST 22:00, endHourは翌2時=26時扱いなので残り4時間
+    expect(countRemainingActiveHours(new Date("2026-08-29T13:00:00Z"), config)).toBe(4);
+  });
+
+  it("counts normally once past midnight", () => {
+    // JST 0:00, 終了は2時なので残り2時間
+    expect(countRemainingActiveHours(new Date("2026-08-29T15:00:00Z"), config)).toBe(2);
   });
 });
 

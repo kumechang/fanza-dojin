@@ -26,3 +26,23 @@ describe("isWithinPostingWindow", () => {
     expect(isWithinPostingWindow(new Date("2026-08-29T14:00:00Z"), config)).toBe(false); // JST 23:00
   });
 });
+
+describe("isWithinPostingWindow (overnight window, startHour > endHour)", () => {
+  const config = { postingWindow: { startHour: 22, endHour: 2 } } as AppConfig;
+
+  it("accepts hours on the late-evening side (before midnight)", () => {
+    expect(isWithinPostingWindow(new Date("2026-08-29T13:00:00Z"), config)).toBe(true); // JST 22:00
+    expect(isWithinPostingWindow(new Date("2026-08-29T14:59:00Z"), config)).toBe(true); // JST 23:59
+  });
+
+  it("accepts hours on the early-morning side (after midnight)", () => {
+    expect(isWithinPostingWindow(new Date("2026-08-29T15:00:00Z"), config)).toBe(true); // JST 0:00
+    expect(isWithinPostingWindow(new Date("2026-08-29T16:59:00Z"), config)).toBe(true); // JST 1:59
+  });
+
+  it("rejects the end boundary and daytime hours", () => {
+    expect(isWithinPostingWindow(new Date("2026-08-29T17:00:00Z"), config)).toBe(false); // JST 2:00
+    expect(isWithinPostingWindow(new Date("2026-08-29T12:59:00Z"), config)).toBe(false); // JST 21:59
+    expect(isWithinPostingWindow(new Date("2026-08-29T03:00:00Z"), config)).toBe(false); // JST 12:00
+  });
+});

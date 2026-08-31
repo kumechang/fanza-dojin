@@ -3,11 +3,14 @@ import { getJstHour } from "./time.js";
 
 export { getJstHour } from "./time.js";
 
-// アカウントのペルソナ(30代女性の生活者)が投稿していて不自然でない時間帯かどうか。
-// GitHub Actionsのscheduleは数時間単位で遅延することがあり、深夜にズレ込んで実行される
-// ことがあるため、そういう回は投稿候補自体を作らずスキップする。
+// 投稿可能時間帯かどうか。GitHub Actionsのscheduleは数時間単位で遅延することがあり、
+// 想定外の時間帯にズレ込んで実行されることがあるため、そういう回は投稿候補自体を作らずスキップする。
+// startHour > endHour の場合は日をまたぐ時間帯(例: 22時〜翌2時)として扱う。
 export function isWithinPostingWindow(date: Date, config: AppConfig): boolean {
   const hour = getJstHour(date);
   const { startHour, endHour } = config.postingWindow;
-  return hour >= startHour && hour < endHour;
+  if (startHour <= endHour) {
+    return hour >= startHour && hour < endHour;
+  }
+  return hour >= startHour || hour < endHour;
 }

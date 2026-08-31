@@ -1,5 +1,5 @@
-# 投稿可能時間帯(config/app.jsonのpostingWindow、既定JST 7〜23時)の間、毎時起動して
-# FANZAの値引き中×人気の高い同人コミックを1件選び、投稿候補を生成する
+# 投稿可能時間帯(config/app.jsonのpostingWindow、既定JST 22時〜翌2時、日をまたぐ)の間、
+# 毎時起動してFANZAの値引き中×人気の高い同人コミックを1件選び、投稿候補を生成する
 # (approvalMode: autoの場合はその場で投稿まで行う)。
 #
 # 実際に生成するかどうかはshouldGenerateNow(src/pipeline/shouldGenerateNow.ts)が
@@ -11,9 +11,9 @@ name: Generate Posts
 
 on:
   schedule:
-    # JST 7〜23時の間、毎時13分に起動(0分ちょうどは混雑回避のためずらす)。
-    # UTC換算: JST 7-9時=UTC22-23時(前日)、JST9-23時=UTC0-13時。
-    - cron: "13 22,23,0,1,2,3,4,5,6,7,8,9,10,11,12,13 * * *"
+    # JST 22時〜翌2時の間、毎時13分に起動(0分ちょうどは混雑回避のためずらす)。
+    # UTC換算: JST 22-25時(翌1時)=UTC 13-16時(同日、9時間差のためUTC側は日をまたがない)。
+    - cron: "13 13,14,15,16 * * *"
   workflow_dispatch: {}
 
 # handle-approval.ymlと同じグループ名を共有し、data/app.dbへの書き込みが競合しないよう直列化する。
