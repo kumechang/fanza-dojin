@@ -77,7 +77,7 @@ npm run typecheck
 
 ## GitHub Actions
 
-- `generate-posts.yml`: 投稿可能時間帯(`postingWindow`、既定JST 22時〜翌2時。日をまたぐ時間帯は`startHour > endHour`で表現する)の間、毎時投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断する。`approvalMode: "auto"`の場合はその場で投稿まで行う。
+- `generate-posts.yml`: 投稿可能時間帯(`postingWindow`、既定JST 7時〜翌2時。日をまたぐ時間帯は`startHour > endHour`で表現する)の間、毎時投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断する。`approvalMode: "auto"`の場合はその場で投稿まで行う。
 - `handle-approval.yml`: Issueコメントに「承認」/「却下」と書かれたら処理(`pending-approval`ラベルが付いたIssueのみ反応)。
 - `collect-metrics.yml`: 毎日、投稿済みツイートのエンゲージメントを取得し`post_metrics`に記録。
 - `analyze-posting-times.yml`: 週1回、`post_metrics`を時間帯別に集計しClaudeに分析させ、`posting_time_weights`(反応の良い時間帯ほど高い重み)を更新する。データが少ない(投稿済み10件未満)うちは分析をスキップし、重みは既定の均等のまま。

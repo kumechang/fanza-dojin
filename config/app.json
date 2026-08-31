@@ -4,7 +4,7 @@
   "platform": "X",
   "xCharLimit": 280,
   "postingWindow": {
-    "startHour": 22,
+    "startHour": 7,
     "endHour": 2
   },
   "targetPostsPerDay": 4,
