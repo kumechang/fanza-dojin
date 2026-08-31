@@ -1,5 +1,5 @@
 {
-  "approvalMode": "auto",
+  "approvalMode": "manual",
   "claudeModel": "claude-sonnet-5",
   "platform": "X",
   "xCharLimit": 280,
