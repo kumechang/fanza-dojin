@@ -55,6 +55,7 @@ function baseConfig(): AppConfig {
     postingWindow: { startHour: 7, endHour: 23 },
     targetPostsPerDay: 4,
     minSpacingHours: 2,
+    censorSampleImages: true,
     fanza: {
       site: "FANZA",
       service: "doujin",

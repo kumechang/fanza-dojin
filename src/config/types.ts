@@ -15,6 +15,9 @@ export interface AppConfig {
   targetPostsPerDay: number;
   // 直近の投稿候補作成からこの時間(h)未満なら、次の生成をスキップする(連投防止)。
   minSpacingHours: number;
+  // サンプル画像の性的な描写部分をEraX-NSFW(YOLO11)で検出し黒塗りするかどうか。
+  // false時は検閲をスキップしてそのまま投稿する(検出モデル側の不具合等に備えた緊急停止用)。
+  censorSampleImages: boolean;
   // FANZA ItemList APIから同人コミックの値引き候補を探すための設定。
   fanza: {
     site: string;   // "FANZA"

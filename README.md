@@ -19,6 +19,13 @@ npm install
 cp .env.example .env
 ```
 
+サンプル画像の性的な描写部分を自動で黒塗りする検閲機能(後述)にはPython 3.11が必要。
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
 `.env`に以下を設定(ローカル実行時のみ必要。GitHub Actions上ではSecretsを使用):
 
 - `ANTHROPIC_API_KEY`: Claude APIキー(投稿時間帯の重み分析にのみ使用。投稿文自体の生成には使わない)
@@ -73,12 +80,23 @@ npm run typecheck
 
 ## 画像スレッド投稿
 
-`src/pipeline/finalizeApprovedPost.ts`が、承認された候補についてサンプル画像をダウンロード→Xへアップロード→スレッド投稿する。画像枚数は作品ごとに異なり、途中でX APIエラーが起きる可能性もあるため、1ツイート確定するごとに進捗(`posts.thread_tweet_ids` / `images_posted_count` / `affiliate_tweet_posted`)をDBへ即時反映する。投稿失敗後に承認コメントを再送すると、途中から再開する(重複投稿はしない)。
+`src/pipeline/finalizeApprovedPost.ts`が、承認された候補についてサンプル画像をダウンロード→(検閲)→Xへアップロード→スレッド投稿する。画像枚数は作品ごとに異なり、途中でX APIエラーが起きる可能性もあるため、1ツイート確定するごとに進捗(`posts.thread_tweet_ids` / `images_posted_count` / `affiliate_tweet_posted`)をDBへ即時反映する。投稿失敗後に承認コメントを再送すると、途中から再開する(重複投稿はしない)。
+
+## サンプル画像の検閲(黒塗り)
+
+サンプル画像の性的に露骨な描写部分は、投稿前に[EraX-NSFW-V1.0](https://huggingface.co/erax-ai/EraX-NSFW-V1.0)(YOLO11ベースの物体検出モデル、Apache 2.0)で自動検出し黒塗りする。
+
+- 検出はNode.js(`src/x/censorImage.ts`)からPythonスクリプト(`scripts/censor_image.py`)をサブプロセスとして呼び出す形で行う(NudeNet等の実写向けモデルは同人イラストにほぼ機能しないことを実地検証済みで、EraX-NSFWに切り替えている)
+- 検出対象クラス(5種類全部): `anus`, `make_love`, `nipple`, `penis`, `vagina`。`make_love`は性交描写全体を囲む広めのボックスで、画像の大部分〜全体が黒塗りされることがあるが、安全側に倒す判断で対象に含めている
+- confidence閾値は0.15(アニメ調イラストは実写より確信度が出にくいため低めに設定)
+- モデルファイル(`models/erax_nsfw_yolo11m.pt`、約40MB)は`.gitignore`対象で、`scripts/ensure_erax_model.py`が無ければHugging Faceから取得する。GitHub Actionsでは`actions/cache`でキャッシュし、実行のたびのダウンロードを避けている
+- 検閲に失敗した場合(Pythonプロセスの起動失敗・タイムアウト等)は例外として投稿処理全体が失敗する(`markPostFailed`、`post_failed`扱いになりIssueに通知される)。**検閲できなければ投稿しない**というフェイルセーフをこの仕組みで実現している
+- `config/app.json`の`censorSampleImages`(既定`true`)を`false`にすると検閲をスキップできる(検出モデル側で問題が起きた際の緊急停止用)
 
 ## GitHub Actions
 
-- `generate-posts.yml`: 投稿可能時間帯(`postingWindow`、既定JST 7時〜翌2時。日をまたぐ時間帯は`startHour > endHour`で表現する)の間、30分おきに投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断する。`approvalMode: "auto"`の場合はその場で投稿まで行う。
-- `handle-approval.yml`: Issueコメントに「承認」/「却下」と書かれたら処理(`pending-approval`ラベルが付いたIssueのみ反応)。
+- `generate-posts.yml`: 投稿可能時間帯(`postingWindow`、既定JST 7時〜翌2時。日をまたぐ時間帯は`startHour > endHour`で表現する)の間、30分おきに投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断する。`approvalMode: "auto"`の場合はその場で投稿(検閲含む)まで行うため、`approvalMode`が`"auto"`のときだけPythonセットアップ・検閲モデルのキャッシュ復元を行い、`"manual"`(既定)ではスキップしてActions実行時間を節約する。
+- `handle-approval.yml`: Issueコメントに「承認」/「却下」と書かれたら処理(`pending-approval`ラベルが付いたIssueのみ反応)。承認時は画像検閲を伴うため、承認モードによらず毎回Pythonセットアップを行う。
 - `collect-metrics.yml`: 毎日、投稿済みツイートのエンゲージメントを取得し`post_metrics`に記録。
 - `analyze-posting-times.yml`: 週1回、`post_metrics`を時間帯別に集計しClaudeに分析させ、`posting_time_weights`(反応の良い時間帯ほど高い重み)を更新する。データが少ない(投稿済み10件未満)うちは分析をスキップし、重みは既定の均等のまま。
 

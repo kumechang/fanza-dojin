@@ -12,6 +12,7 @@ import {
 } from "../db/repositories/postsRepo.js";
 import { postTweet, postReply, TweetTooLongError } from "../x/postTweet.js";
 import { downloadImage, uploadImages, chunkImages } from "../x/mediaUpload.js";
+import { censorImages } from "../x/censorImage.js";
 import { closeIssueWithResult, commentOnIssue } from "../github/closeIssueWithResult.js";
 import { logger } from "../lib/logger.js";
 import { describeXApiError } from "../lib/xErrorMessage.js";
@@ -50,7 +51,7 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
     // ① 先頭ツイート(タイトル+先頭imagesPerTweet枚)。まだ投稿していなければ実行する。
     if ((JSON.parse(current.thread_tweet_ids) as string[]).length === 0) {
       const leadImages = sampleImageUrls.slice(0, config.fanza.imagesPerTweet);
-      const mediaIds = leadImages.length > 0 ? await downloadAndUpload(accountName, leadImages) : undefined;
+      const mediaIds = leadImages.length > 0 ? await downloadAndUpload(accountName, config, leadImages) : undefined;
       const result = await postTweet(accountName, current.title, config.xCharLimit, mediaIds);
       setLeadTweet(db, current.id, result.tweetId, result.tweetUrl);
       appendThreadTweet(db, current.id, result.tweetId, leadImages.length);
@@ -62,7 +63,7 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
     for (const chunk of chunkImages(remainingImages, config.fanza.imagesPerTweet)) {
       const threadIds = JSON.parse(current.thread_tweet_ids) as string[];
       const lastTweetId = threadIds[threadIds.length - 1]!;
-      const mediaIds = await downloadAndUpload(accountName, chunk);
+      const mediaIds = await downloadAndUpload(accountName, config, chunk);
       const result = await postReply(accountName, "", lastTweetId, config.xCharLimit, mediaIds);
       appendThreadTweet(db, current.id, result.tweetId, chunk.length);
       current = requirePost(db, current.id);
@@ -98,8 +99,9 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
   }
 }
 
-async function downloadAndUpload(accountName: string, urls: string[]): Promise<string[]> {
-  const images = await Promise.all(urls.map((url) => downloadImage(url)));
+async function downloadAndUpload(accountName: string, config: AppConfig, urls: string[]): Promise<string[]> {
+  const downloaded = await Promise.all(urls.map((url) => downloadImage(url)));
+  const images = config.censorSampleImages ? await censorImages(downloaded) : downloaded;
   return uploadImages(accountName, images);
 }
 
