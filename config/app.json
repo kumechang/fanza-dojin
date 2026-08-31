@@ -1,29 +1,20 @@
 {
   "approvalMode": "manual",
   "claudeModel": "claude-sonnet-5",
-  "selfCheckPassThreshold": 80,
   "platform": "X",
   "xCharLimit": 280,
-  "targetProductRatio": {
-    "review": 0.1,
-    "sale": 0.05
-  },
-  "recentPostsWindow": 10,
   "postingWindow": {
     "startHour": 7,
     "endHour": 23
   },
   "targetPostsPerDay": 4,
   "minSpacingHours": 2,
-  "replySettings": {
-    "targetRepliesPerDay": 10,
-    "minSpacingHours": 1,
-    "minFollowers": 50,
-    "maxFollowers": 50000,
-    "keywords": ["部屋干し", "柔軟剤", "生乾き臭", "洗濯あるある"]
-  },
-  "mentionReplySettings": {
-    "maxRepliesPerRun": 5,
-    "maxRepliesPerDay": 5
+  "fanza": {
+    "site": "FANZA",
+    "service": "doujin",
+    "floor": "digital_doujin",
+    "hits": 100,
+    "maxPages": 3,
+    "imagesPerTweet": 2
   }
 }

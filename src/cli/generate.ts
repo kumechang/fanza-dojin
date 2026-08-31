@@ -1,6 +1,5 @@
 import { getDb } from "../db/client.js";
 import { loadConfig } from "../config/loadConfig.js";
-import { syncProducts } from "../products/syncProducts.js";
 import { generateCandidate } from "../pipeline/generateCandidate.js";
 import { logger } from "../lib/logger.js";
 
@@ -9,7 +8,6 @@ async function main(): Promise<void> {
   const db = getDb();
   const config = loadConfig();
 
-  syncProducts(db);
   const postId = await generateCandidate(db, config);
 
   logger.info("generate finished", { postId });

@@ -1,51 +1,48 @@
--- data/products.json (人が手動編集する商品マスタ) をDBへ同期したもの。
-CREATE TABLE IF NOT EXISTS products (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  asin TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  description TEXT,
-  price INTEGER, -- 手動登録のため陳腐化しうる。投稿文では断定的な価格表現をしない前提
-  image_url TEXT,
-  affiliate_url TEXT NOT NULL,
-  category TEXT,
-  tags TEXT, -- JSON配列を文字列として保存
-  active INTEGER NOT NULL DEFAULT 1, -- 0にするとローテーション候補から外れる
-  priority INTEGER NOT NULL DEFAULT 0, -- ローテーションで最終使用日時が同点だった場合のタイブレーク
-  created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-  updated_at TEXT
-);
-
--- 生成された投稿候補1件につき1行。pending_approval -> approved/rejected -> posted/posted_dryrun/post_failed
--- というライフサイクルをstatusで管理する。
+-- FANZA ItemList APIから都度取得した候補1件につき1行。生成AIによる文面生成は行わず
+-- 商品タイトルをそのまま投稿文として使うため、strategy_json等の生成AI関連カラムは持たない。
+-- pending_approval -> approved/rejected -> posted/posted_dryrun/post_failed というライフサイクルは
+-- 旧productsテーブル運用時から変更していない。
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   platform TEXT NOT NULL DEFAULT 'X',
-  product_id INTEGER REFERENCES products(id),
-  post_type TEXT,          -- strategy_json.post_type のコピー(検索・比率集計用)
-  product_usage TEXT,      -- strategy_json.product_usage のコピー: none|natural|main
-  strategy_json TEXT NOT NULL,   -- 戦略決定ステージの生JSON
-  generated_text TEXT NOT NULL,  -- 投稿生成ステージの生テキスト(セルフチェック前)
-  selfcheck_json TEXT NOT NULL,  -- セルフチェックステージの生JSON
-  final_text TEXT NOT NULL,      -- 常にselfcheck_json.final_postを採用した最終候補本文
-  self_check_score INTEGER,      -- selfcheck_json.score のコピー
-  self_check_pass INTEGER,       -- selfcheck_json.pass のコピー(0/1)
+
+  -- FANZA ItemList APIから取得した候補の情報(取得時点のスナップショット)。
+  content_id TEXT NOT NULL, -- FANZA側の商品ID。UNIQUE制約は付けない(却下/投稿失敗した作品は
+                             -- 限られたセール在庫の中で再候補になり得るため。除外は選定ロジック側で行う)
+  title TEXT NOT NULL,      -- 投稿文としてそのまま使う
+  affiliate_url TEXT NOT NULL,
+  sample_image_urls TEXT NOT NULL, -- JSON配列(sampleImageURL.sample_l.image[]、順序保持)
+  price INTEGER,            -- 取得時点のセール価格(price文字列のパース失敗時はNULL)
+  list_price INTEGER,       -- 取得時点の定価(同上)
+  campaign_title TEXT,      -- campaign[0].title等。値引き判定根拠の監査用
+  genre_names TEXT,         -- iteminfo.genre[].name のJSON配列。コミック判定根拠の監査用
+  review_count INTEGER,
+  review_average REAL,
+  fetch_offset INTEGER,     -- ItemList取得時のoffset(何ページ目から見つかったかの監査用)
+
   status TEXT NOT NULL DEFAULT 'pending_approval',
     -- pending_approval | approved | rejected | posted | posted_dryrun | post_failed
-  github_issue_number INTEGER UNIQUE, -- 承認用Issueの番号。-1相当(未作成)はUNIQUE制約を避けNULLで扱う
+  github_issue_number INTEGER UNIQUE,
   github_issue_url TEXT,
-  approved_by TEXT,            -- 承認/却下コメントをしたGitHubユーザー名
+  approved_by TEXT,
   approval_comment_body TEXT,
-  tweet_id TEXT,
+
+  -- Xスレッド投稿の進捗。中断(投稿失敗)からの再開に対応するため、1ツイート確定するごとに随時更新する。
+  thread_tweet_ids TEXT NOT NULL DEFAULT '[]',    -- JSON配列。[0]=先頭ツイート, 以降=画像リプライ, 最後=アフィリエイトリンク
+  images_posted_count INTEGER NOT NULL DEFAULT 0, -- スレッドに貼り終えたサンプル画像の累計枚数
+  affiliate_tweet_posted INTEGER NOT NULL DEFAULT 0, -- アフィリエイトリンクのリプライまで完了したか(0/1)
+
+  tweet_id TEXT,   -- 先頭ツイートのID。post_metricsが参照する
   tweet_url TEXT,
-  post_error TEXT,             -- 投稿失敗時のエラーメッセージ
-  run_id TEXT,                 -- GitHub ActionsのRun ID(トレース用)
+  post_error TEXT, -- 投稿失敗時のエラーメッセージ
+  run_id TEXT,     -- GitHub ActionsのRun ID(トレース用)
   created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
   approved_at TEXT,
   posted_at TEXT,
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_posts_status ON posts(status);
-CREATE INDEX IF NOT EXISTS idx_posts_product ON posts(product_id);
+CREATE INDEX IF NOT EXISTS idx_posts_content_id ON posts(content_id);
 
 -- 投稿ごとのエンゲージメントを「最新値で上書き」ではなくスナップショットとして時系列に蓄積する
 -- (将来のフィードバックループ用。engagement_rateは記録時点で計算して保存)。
@@ -68,44 +65,5 @@ CREATE TABLE IF NOT EXISTS posting_time_weights (
   hour INTEGER PRIMARY KEY, -- 0-23 (JST)
   weight REAL NOT NULL DEFAULT 1.0,
   reason TEXT,              -- Claudeが重みをそう判断した理由(監査用)
-  updated_at TEXT
-);
-
--- 他アカウントの投稿への返信候補。postsテーブルとはライフサイクル・フィールドが異なる
--- (相手の投稿情報を持つ)ため独立したテーブルにしている。
-CREATE TABLE IF NOT EXISTS reply_candidates (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  source TEXT NOT NULL,              -- 'keyword' | 'watched_account' | 'mention'
-  matched_keyword TEXT,              -- source='keyword'の場合のみ、ヒットしたキーワード(事後の部分一致判定)
-  target_tweet_id TEXT NOT NULL UNIQUE, -- UNIQUE制約で同じ投稿への重複返信を防ぐ
-  target_author_username TEXT NOT NULL,
-  target_text TEXT NOT NULL,
-  target_follower_count INTEGER,
-  reply_text TEXT,                   -- should_reply=falseならNULL
-  should_reply INTEGER NOT NULL,     -- Claudeの判断(0/1)
-  skip_reason TEXT,                  -- should_reply=falseの理由
-  status TEXT NOT NULL DEFAULT 'pending_approval',
-    -- pending_approval | approved | rejected | posted | posted_dryrun | post_failed | skipped
-  github_issue_number INTEGER UNIQUE,
-  github_issue_url TEXT,
-  approved_by TEXT,
-  approval_comment_body TEXT,
-  reply_tweet_id TEXT,
-  reply_tweet_url TEXT,
-  post_error TEXT,
-  run_id TEXT,
-  created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-  approved_at TEXT,
-  posted_at TEXT,
-  updated_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_reply_candidates_status ON reply_candidates(status);
-
--- キーワードごとの返信候補優先度。週次のanalyze-reply-keywordsが更新する。
--- posting_time_weightsのキーワード版(hourの代わりにkeywordがキー)。
-CREATE TABLE IF NOT EXISTS reply_keyword_weights (
-  keyword TEXT PRIMARY KEY,
-  weight REAL NOT NULL DEFAULT 1.0,
-  reason TEXT,
   updated_at TEXT
 );

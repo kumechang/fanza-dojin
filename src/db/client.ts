@@ -17,14 +17,5 @@ export function getDb(): Database.Database {
   const schema = readFileSync(SCHEMA_PATH, "utf-8");
   db.exec(schema);
 
-  // CREATE TABLE IF NOT EXISTSは既存テーブルへの列追加はしないため、
-  // 既にreply_candidatesが存在するDBに対してはここでガード付きALTERする。
-  const hasMatchedKeyword = db
-    .prepare(`SELECT 1 FROM pragma_table_info('reply_candidates') WHERE name = 'matched_keyword'`)
-    .get();
-  if (!hasMatchedKeyword) {
-    db.exec(`ALTER TABLE reply_candidates ADD COLUMN matched_keyword TEXT`);
-  }
-
   return db;
 }

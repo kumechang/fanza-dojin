@@ -64,8 +64,8 @@ function createTestDb(): Database.Database {
 function insertPost(db: Database.Database, createdAtIso: string): void {
   const sqliteFormat = createdAtIso.replace("T", " ").replace("Z", "");
   db.prepare(
-    `INSERT INTO posts (platform, strategy_json, generated_text, selfcheck_json, final_text, status, created_at)
-     VALUES ('X', '{}', 'text', '{}', 'text', 'pending_approval', ?)`
+    `INSERT INTO posts (platform, content_id, title, affiliate_url, sample_image_urls, status, created_at)
+     VALUES ('X', 'test001', 'test title', 'https://example.com', '[]', 'pending_approval', ?)`
   ).run(sqliteFormat);
 }
 

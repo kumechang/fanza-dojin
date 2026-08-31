@@ -1,11 +1,12 @@
 # 投稿可能時間帯(config/app.jsonのpostingWindow、既定JST 7〜23時)の間、毎時起動して
-# 投稿候補を生成する(approvalMode: autoの場合はその場で投稿まで行う)。
+# FANZAの値引き中×人気の高い同人コミックを1件選び、投稿候補を生成する
+# (approvalMode: autoの場合はその場で投稿まで行う)。
 #
 # 実際に生成するかどうかはshouldGenerateNow(src/pipeline/shouldGenerateNow.ts)が
 # 1日の目標投稿数・直近投稿からの間隔・時間帯の重みをもとに判断するため、毎時起動しても
-# Claude API呼び出し(コスト)は目標水準(targetPostsPerDay)に保たれる。
+# FANZA API呼び出しは目標水準(targetPostsPerDay)に保たれる。
 # 毎時にしているのは、GitHub Actionsのscheduleが数時間単位で遅延・スキップされることが
-# 実際にあったため(1日4回の決め打ち運用だと1回飛ぶだけで影響が大きい)。
+# 実際にあったため(1日数回の決め打ち運用だと1回飛ぶだけで影響が大きい)。
 name: Generate Posts
 
 on:
@@ -39,7 +40,8 @@ jobs:
 
       - name: Generate candidate post
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FANZA_API_ID: ${{ secrets.FANZA_API_ID }}
+          FANZA_AFFILIATE_ID: ${{ secrets.FANZA_AFFILIATE_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           X_API_KEY: ${{ secrets.X_API_KEY }}

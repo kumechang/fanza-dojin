@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
 import { getJstDateString, parseDbTimestamp } from "../../lib/time.js";
 
-// postsテーブルへのアクセス層。1レコードが投稿候補1件のライフサイクル全体
-// (生成→承認待ち→承認/却下→投稿済み/失敗)を表す。
+// postsテーブルへのアクセス層。1レコードがFANZA候補1件のライフサイクル全体
+// (取得→承認待ち→承認/却下→投稿済み/失敗)を表す。
 export type PostStatus =
   | "pending_approval"
   | "approved"
@@ -13,35 +13,42 @@ export type PostStatus =
 
 export interface CreatePostInput {
   platform: string;
-  product_id: number | null;
-  post_type: string | null;
-  product_usage: string | null;
-  strategy_json: string;
-  generated_text: string;
-  selfcheck_json: string;
-  final_text: string;
-  self_check_score: number | null;
-  self_check_pass: boolean;
+  content_id: string;
+  title: string;
+  affiliate_url: string;
+  sample_image_urls: string[];
+  price: number | null;
+  list_price: number | null;
+  campaign_title: string | null;
+  genre_names: string[];
+  review_count: number | null;
+  review_average: number | null;
+  fetch_offset: number | null;
   run_id: string | null;
 }
 
 export interface PostRow {
   id: number;
   platform: string;
-  product_id: number | null;
-  post_type: string | null;
-  product_usage: string | null;
-  strategy_json: string;
-  generated_text: string;
-  selfcheck_json: string;
-  final_text: string;
-  self_check_score: number | null;
-  self_check_pass: number | null;
+  content_id: string;
+  title: string;
+  affiliate_url: string;
+  sample_image_urls: string;
+  price: number | null;
+  list_price: number | null;
+  campaign_title: string | null;
+  genre_names: string | null;
+  review_count: number | null;
+  review_average: number | null;
+  fetch_offset: number | null;
   status: PostStatus;
   github_issue_number: number | null;
   github_issue_url: string | null;
   approved_by: string | null;
   approval_comment_body: string | null;
+  thread_tweet_ids: string;
+  images_posted_count: number;
+  affiliate_tweet_posted: number;
   tweet_id: string | null;
   tweet_url: string | null;
   post_error: string | null;
@@ -57,20 +64,22 @@ export interface PostRow {
 export function createPost(db: Database.Database, input: CreatePostInput): number {
   const result = db
     .prepare(
-      `INSERT INTO posts (platform, product_id, post_type, product_usage, strategy_json, generated_text, selfcheck_json, final_text, self_check_score, self_check_pass, status, run_id, updated_at)
-       VALUES (@platform, @product_id, @post_type, @product_usage, @strategy_json, @generated_text, @selfcheck_json, @final_text, @self_check_score, @self_check_pass, 'pending_approval', @run_id, CURRENT_TIMESTAMP)`
+      `INSERT INTO posts (platform, content_id, title, affiliate_url, sample_image_urls, price, list_price, campaign_title, genre_names, review_count, review_average, fetch_offset, status, run_id, updated_at)
+       VALUES (@platform, @content_id, @title, @affiliate_url, @sample_image_urls, @price, @list_price, @campaign_title, @genre_names, @review_count, @review_average, @fetch_offset, 'pending_approval', @run_id, CURRENT_TIMESTAMP)`
     )
     .run({
       platform: input.platform,
-      product_id: input.product_id,
-      post_type: input.post_type,
-      product_usage: input.product_usage,
-      strategy_json: input.strategy_json,
-      generated_text: input.generated_text,
-      selfcheck_json: input.selfcheck_json,
-      final_text: input.final_text,
-      self_check_score: input.self_check_score,
-      self_check_pass: input.self_check_pass ? 1 : 0,
+      content_id: input.content_id,
+      title: input.title,
+      affiliate_url: input.affiliate_url,
+      sample_image_urls: JSON.stringify(input.sample_image_urls),
+      price: input.price,
+      list_price: input.list_price,
+      campaign_title: input.campaign_title,
+      genre_names: JSON.stringify(input.genre_names),
+      review_count: input.review_count,
+      review_average: input.review_average,
+      fetch_offset: input.fetch_offset,
       run_id: input.run_id,
     });
   return Number(result.lastInsertRowid);
@@ -88,6 +97,16 @@ export function getPostById(db: Database.Database, id: number): PostRow | undefi
 
 export function getPostByIssueNumber(db: Database.Database, issueNumber: number): PostRow | undefined {
   return db.prepare(`SELECT * FROM posts WHERE github_issue_number = ?`).get(issueNumber) as PostRow | undefined;
+}
+
+// selectFanzaCandidate用: 既に候補になったことがある(=もう一度紹介する必要がない)content_idの集合。
+// 却下・投稿失敗は限られたセール在庫の中で再候補になり得るため除外対象に含めない
+// (承認済み・投稿済みのものだけを「もう紹介した」とみなす)。
+export function getUsedContentIds(db: Database.Database): Set<string> {
+  const rows = db
+    .prepare(`SELECT DISTINCT content_id FROM posts WHERE status IN ('approved', 'posted', 'posted_dryrun')`)
+    .all() as { content_id: string }[];
+  return new Set(rows.map((row) => row.content_id));
 }
 
 // shouldGenerateNow用: 指定したJSTカレンダー日に生成された投稿候補数(承認/却下/投稿結果を問わない)。
@@ -109,52 +128,6 @@ export function getLastPostCreatedAt(db: Database.Database): string | null {
     last_created: string | null;
   };
   return row.last_created;
-}
-
-// {{recent_posts}}用。却下・投稿失敗した候補は「実際に世に出た投稿」ではないため対象から除外する。
-export function listRecentPublishedPosts(db: Database.Database, limit: number): PostRow[] {
-  return db
-    .prepare(
-      `SELECT * FROM posts
-       WHERE status IN ('approved', 'posted', 'posted_dryrun')
-       ORDER BY created_at DESC
-       LIMIT ?`
-    )
-    .all(limit) as PostRow[];
-}
-
-// 商品ローテーション選定用。productsテーブルに「最終使用日時」を持たせず、
-// posts側から都度導出することで、却下/失敗した候補がローテーションを歪めないようにしている。
-export function getLastUsedAtForProduct(db: Database.Database, productId: number): string | null {
-  const row = db
-    .prepare(
-      `SELECT MAX(created_at) as last_used FROM posts
-       WHERE product_id = ? AND status IN ('approved', 'posted', 'posted_dryrun') AND product_usage IN ('natural', 'main')`
-    )
-    .get(productId) as { last_used: string | null };
-  return row.last_used;
-}
-
-// 直近window件のpost_type内訳。postConditions側で「商品紹介比率が目標を超えていないか」の
-// ヒント生成に使う。
-export function countRecentByPostType(db: Database.Database, window: number): Record<string, number> {
-  const rows = db
-    .prepare(
-      `SELECT post_type, COUNT(*) as cnt FROM (
-         SELECT post_type FROM posts
-         WHERE status IN ('approved', 'posted', 'posted_dryrun')
-         ORDER BY created_at DESC
-         LIMIT ?
-       )
-       GROUP BY post_type`
-    )
-    .all(window) as { post_type: string | null; cnt: number }[];
-
-  const result: Record<string, number> = {};
-  for (const row of rows) {
-    if (row.post_type) result[row.post_type] = row.cnt;
-  }
-  return result;
 }
 
 export function markApproved(db: Database.Database, id: number, approvedBy: string, commentBody: string): void {
@@ -184,52 +157,38 @@ export function extractRejectionReason(commentBody: string): string | null {
   return stripped.length > 0 ? stripped : null;
 }
 
-export interface RejectionFeedback {
-  createdAt: string;
-  postType: string | null;
-  theme: string | null;
-  reason: string;
-}
-
-// フィードバックループ用: 理由が書かれている却下投稿だけを新しい順に返す。
-// 次回以降の生成時に「同じ方向性を避ける」ヒントとして{{post_conditions}}に渡す。
-export function listRecentRejectionFeedback(db: Database.Database, limit: number): RejectionFeedback[] {
-  const rows = db
-    .prepare(
-      `SELECT created_at, post_type, strategy_json, approval_comment_body FROM posts
-       WHERE status = 'rejected' AND approval_comment_body IS NOT NULL
-       ORDER BY created_at DESC
-       LIMIT ?`
-    )
-    .all(limit) as {
-    created_at: string;
-    post_type: string | null;
-    strategy_json: string;
-    approval_comment_body: string | null;
-  }[];
-
-  const feedback: RejectionFeedback[] = [];
-  for (const row of rows) {
-    if (!row.approval_comment_body) continue;
-    const reason = extractRejectionReason(row.approval_comment_body);
-    if (!reason) continue;
-
-    let theme: string | null = null;
-    try {
-      theme = (JSON.parse(row.strategy_json) as { theme?: string }).theme ?? null;
-    } catch {
-      // strategy_jsonが壊れていてもフィードバック自体は活かす
-    }
-
-    feedback.push({ createdAt: row.created_at, postType: row.post_type, theme, reason });
-  }
-  return feedback;
-}
-
-export function markPosted(db: Database.Database, id: number, tweetId: string, tweetUrl: string): void {
+// Xスレッド投稿の進捗を1ツイート確定するごとに記録する。投稿失敗→再承認での再実行時、
+// finalizeApprovedPostがここに保存された進捗から続きを再開できるようにするための関数群。
+export function appendThreadTweet(db: Database.Database, postId: number, tweetId: string, imagesAdded: number): void {
+  const post = getPostById(db, postId);
+  if (!post) throw new Error(`post not found: ${postId}`);
+  const threadIds = JSON.parse(post.thread_tweet_ids) as string[];
+  threadIds.push(tweetId);
   db.prepare(
-    `UPDATE posts SET status = 'posted', tweet_id = ?, tweet_url = ?, posted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(tweetId, tweetUrl, id);
+    `UPDATE posts SET thread_tweet_ids = ?, images_posted_count = images_posted_count + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(JSON.stringify(threadIds), imagesAdded, postId);
+}
+
+export function setLeadTweet(db: Database.Database, postId: number, tweetId: string, tweetUrl: string): void {
+  db.prepare(
+    `UPDATE posts SET tweet_id = ?, tweet_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(tweetId, tweetUrl, postId);
+}
+
+export function markAffiliateTweetPosted(db: Database.Database, postId: number, tweetId: string): void {
+  const post = getPostById(db, postId);
+  if (!post) throw new Error(`post not found: ${postId}`);
+  const threadIds = JSON.parse(post.thread_tweet_ids) as string[];
+  threadIds.push(tweetId);
+  db.prepare(
+    `UPDATE posts SET thread_tweet_ids = ?, affiliate_tweet_posted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(JSON.stringify(threadIds), postId);
+}
+
+export function markPosted(db: Database.Database, id: number): void {
+  db.prepare(
+    `UPDATE posts SET status = 'posted', posted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(id);
 }
 
 export function markPostedDryRun(db: Database.Database, id: number): void {

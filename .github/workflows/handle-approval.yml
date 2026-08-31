@@ -1,4 +1,4 @@
-# 承認用Issueへの「承認」/「却下」コメントを検知し、承認ならXへ投稿する。
+# 承認用Issueへの「承認」/「却下」コメントを検知し、承認ならXへ画像スレッド投稿する。
 name: Handle Approval
 
 on:
@@ -42,8 +42,8 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
         run: npm run handle-approval
 
-      # if: always() — 例えば承認後の投稿処理でX投稿自体が失敗しても、
-      # 承認された事実やpost_failedへの状態遷移はコミットして残す
+      # if: always() — 例えば承認後の画像スレッド投稿が途中で失敗しても、
+      # 承認された事実や進捗(thread_tweet_ids等)・post_failedへの状態遷移はコミットして残す
       # (これが無いと、DB上は承認前のままになり「既に処理済み」判定もできず、
       # 承認コメントをもう一度書いても状況が変わらないまま失敗を繰り返すことになる)。
       - name: Commit DB changes

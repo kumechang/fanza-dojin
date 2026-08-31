@@ -13,6 +13,10 @@ export const env = {
     accessToken: process.env.X_ACCESS_TOKEN ?? "",
     accessSecret: process.env.X_ACCESS_SECRET ?? "",
   },
+  fanza: {
+    apiId: process.env.FANZA_API_ID ?? "",
+    affiliateId: process.env.FANZA_AFFILIATE_ID ?? "",
+  },
 };
 
 export function hasAnthropicKey(): boolean {
@@ -26,6 +30,10 @@ export function hasXCredentials(): boolean {
     env.x.accessToken.length > 0 &&
     env.x.accessSecret.length > 0
   );
+}
+
+export function hasFanzaCredentials(): boolean {
+  return env.fanza.apiId.length > 0 && env.fanza.affiliateId.length > 0;
 }
 
 export function parseGithubRepository(): { owner: string; repo: string } | null {

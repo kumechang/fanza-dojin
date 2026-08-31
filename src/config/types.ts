@@ -1,16 +1,10 @@
 // config/app.json の型定義。
 export interface AppConfig {
   approvalMode: "manual" | "auto";
-  claudeModel: string;
-  selfCheckPassThreshold: number;
+  claudeModel: string; // 投稿時間帯の重み分析(analyzePostingTimes)にのみ使用
   platform: string;
   xCharLimit: number;
-  targetProductRatio: {
-    review: number;
-    sale: number;
-  };
-  recentPostsWindow: number;
-  // アカウントのペルソナ(30代女性の生活者)が投稿していて不自然でない時間帯(JST)。
+  // このアカウントが投稿していて不自然でない時間帯(JST)。
   // scheduleの発火遅延でこの範囲外にズレ込んだ場合、その回は投稿候補を作らずスキップする。
   postingWindow: {
     startHour: number;
@@ -21,17 +15,13 @@ export interface AppConfig {
   targetPostsPerDay: number;
   // 直近の投稿候補作成からこの時間(h)未満なら、次の生成をスキップする(連投防止)。
   minSpacingHours: number;
-  // 他アカウントの投稿への返信機能の設定(能動的アプローチ。手動投稿の下書き支援のみ)。
-  replySettings: {
-    targetRepliesPerDay: number;
-    minSpacingHours: number;
-    minFollowers: number;
-    maxFollowers: number;
-    keywords: string[];
-  };
-  // 自分が@メンションされた投稿への返信設定(X APIの仕様上ここのみ自動投稿可能)。
-  mentionReplySettings: {
-    maxRepliesPerRun: number;
-    maxRepliesPerDay: number;
+  // FANZA ItemList APIから同人コミックの値引き候補を探すための設定。
+  fanza: {
+    site: string;   // "FANZA"
+    service: string; // "doujin"
+    floor: string;   // "digital_doujin"
+    hits: number;    // 1リクエストあたりの取得件数(最大100)
+    maxPages: number; // sort=rank順に何ページまで舐めて値引き中の候補を探すか
+    imagesPerTweet: number; // 1ツイートに添付するサンプル画像枚数
   };
 }
