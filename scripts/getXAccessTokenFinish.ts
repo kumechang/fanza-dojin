@@ -32,10 +32,14 @@ async function main(): Promise<void> {
   const { accessToken, accessSecret, screenName } = await pinClient.login(pin);
   rmSync(TEMP_PATH, { force: true });
 
+  const entry = { name: screenName, accessToken, accessSecret };
   console.log(`\n認可が完了しました(アカウント: @${screenName})。`);
-  console.log("以下を .env の該当行に上書きしてください:\n");
-  console.log(`X_ACCESS_TOKEN=${accessToken}`);
-  console.log(`X_ACCESS_SECRET=${accessSecret}`);
+  console.log("以下のエントリを .env の X_ACCOUNTS_JSON(JSON配列)に追記してください:\n");
+  console.log(JSON.stringify(entry));
+  console.log(
+    "\n複数アカウントを認可する場合は、このstart→finishの手順を1アカウントずつ完了させてから次に進んでください" +
+      "(.x-oauth-temp.json を使い回すため並行実行はできません)。"
+  );
 }
 
 main().catch((error) => {

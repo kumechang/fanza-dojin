@@ -14,6 +14,24 @@ export function getDb(): Database.Database {
   db = new Database(DB_PATH);
   // WALモードは使わない: ワークフローはプロセス終了ごとにdata/app.dbをそのままgitコミットするため、
   // -wal/-shm補助ファイルを残さず単一ファイルで完結させる。
+
+  // CREATE TABLE IF NOT EXISTSは既存テーブルへの列追加はしないため、
+  // マルチアカウント対応前から存在するDBに対してはここでガード付きALTERする。
+  // schema.sql本体(account_nameを参照するインデックス定義を含む)を適用する前に、
+  // カラム自体を先に追加しておく必要がある(順序を逆にするとCREATE INDEXが
+  // 存在しないカラムを参照してSQLITE_ERRORになる)。
+  const postsTableExists = db
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'posts'`)
+    .get();
+  if (postsTableExists) {
+    const hasAccountName = db
+      .prepare(`SELECT 1 FROM pragma_table_info('posts') WHERE name = 'account_name'`)
+      .get();
+    if (!hasAccountName) {
+      db.exec(`ALTER TABLE posts ADD COLUMN account_name TEXT NOT NULL DEFAULT ''`);
+    }
+  }
+
   const schema = readFileSync(SCHEMA_PATH, "utf-8");
   db.exec(schema);
 

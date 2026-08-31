@@ -21,9 +21,10 @@ export interface SelectedFanzaCandidate {
 export async function selectFanzaCandidate(
   db: Database.Database,
   config: AppConfig,
+  accountName: string,
   fetchFn: (params: Parameters<typeof fetchItemList>[0]) => Promise<FetchItemListResult> = fetchItemList
 ): Promise<SelectedFanzaCandidate | null> {
-  const usedContentIds = getUsedContentIds(db);
+  const usedContentIds = getUsedContentIds(db, accountName);
   const { fanza } = config;
 
   for (let page = 0; page < fanza.maxPages; page++) {

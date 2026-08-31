@@ -14,11 +14,12 @@ import { shouldGenerateNow } from "./shouldGenerateNow.js";
 // の順に実行し、最後にautoモードなら即時投稿まで行う。
 // GitHub Actionsのscheduleは数時間単位で遅延することがあり、想定外に深夜へズレ込んで
 // 実行されることがあるため、そういう回は投稿候補自体を作らずスキップする(nullを返す)。
-export async function generateCandidate(db: Database.Database, config: AppConfig): Promise<number | null> {
+export async function generateCandidate(db: Database.Database, config: AppConfig, accountName: string): Promise<number | null> {
   const now = new Date();
 
   if (!isWithinPostingWindow(now, config)) {
     logger.warn("outside posting window, skipping this run", {
+      accountName,
       postingWindow: config.postingWindow,
     });
     return null;
@@ -26,15 +27,15 @@ export async function generateCandidate(db: Database.Database, config: AppConfig
 
   // generate-postsは投稿可能時間帯の間毎時起動する(schedule遅延・スキップへの耐性のため)。
   // 実際に生成するかどうかは、1日の目標数・直近投稿からの間隔・時間帯の重みをもとに
-  // ここで判断する。
-  if (!shouldGenerateNow(db, config, now)) {
-    logger.info("skipping this run (throttled by shouldGenerateNow)");
+  // ここで判断する(目標数・間隔はアカウントごとに独立して判定する)。
+  if (!shouldGenerateNow(db, config, now, accountName)) {
+    logger.info("skipping this run (throttled by shouldGenerateNow)", { accountName });
     return null;
   }
 
-  const candidate = await selectFanzaCandidate(db, config);
+  const candidate = await selectFanzaCandidate(db, config, accountName);
   if (!candidate) {
-    logger.info("no eligible FANZA candidate found, skipping this run");
+    logger.info("no eligible FANZA candidate found, skipping this run", { accountName });
     return null;
   }
 
@@ -46,6 +47,7 @@ export async function generateCandidate(db: Database.Database, config: AppConfig
 
   const postId = createPost(db, {
     platform: config.platform,
+    account_name: accountName,
     content_id: item.content_id,
     title: item.title,
     affiliate_url: item.affiliateURL,
@@ -61,6 +63,7 @@ export async function generateCandidate(db: Database.Database, config: AppConfig
   });
 
   const issue = await createApprovalIssue({
+    accountName,
     title: item.title,
     price,
     listPrice,
@@ -74,7 +77,7 @@ export async function generateCandidate(db: Database.Database, config: AppConfig
     setGithubIssue(db, postId, issue.number, issue.url);
   }
 
-  logger.info("candidate created", { postId, issueNumber: issue.number, contentId: item.content_id });
+  logger.info("candidate created", { accountName, postId, issueNumber: issue.number, contentId: item.content_id });
 
   if (config.approvalMode === "auto") {
     const post = getPostById(db, postId);

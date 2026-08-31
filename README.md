@@ -10,6 +10,8 @@ FANZA ItemList APIから同人ジャンル(`service=doujin`, `floor=digital_douj
 
 承認モードは`config/app.json`の`approvalMode`で`"manual"` / `"auto"`を切り替え可能(成人向けコンテンツのため既定は`"manual"`)。
 
+**複数のXアカウントで同時に運用できる**(それぞれ別の作品を投稿する)。アカウント間の重複投稿防止は行わない(たまたま同じ作品が被ることは許容する)。
+
 ## セットアップ
 
 ```bash
@@ -21,10 +23,34 @@ cp .env.example .env
 
 - `ANTHROPIC_API_KEY`: Claude APIキー(投稿時間帯の重み分析にのみ使用。投稿文自体の生成には使わない)
 - `FANZA_API_ID` / `FANZA_AFFILIATE_ID`: FANZA(DMM) Affiliate APIの認証情報
-- `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET`: X API v2(OAuth 1.0a user context)の認証情報
+- `X_API_KEY` / `X_API_SECRET`: X API v2のDeveloperアプリキー(全アカウント共通)
+- `X_ACCOUNTS_JSON`: 投稿先アカウントごとの認証情報をまとめたJSON配列(後述)
 - `GITHUB_TOKEN` / `GITHUB_REPOSITORY`: ローカルからGitHub Issue操作を試す場合のみ
 
 各キーが未設定でも処理は落ちず、ドライラン(ログ出力のみ)で動作する。
+
+## 複数アカウントの追加方法
+
+新しいXアカウントでこのシステムを使いたい場合、コードやworkflowの変更は不要で、`X_ACCOUNTS_JSON`に1エントリ追記するだけでよい。
+
+1. 追加したいXアカウントでログインした状態のブラウザを用意する
+2. `npm run get-x-token:start` を実行し、表示されたURLをそのブラウザで開いて認可、PINコードを取得する
+3. `npm run get-x-token:finish -- <PINコード>` を実行すると、`X_ACCOUNTS_JSON`に追記すべきJSON片が出力される
+4. それを`.env`(ローカル)または`X_ACCOUNTS_JSON` Secret(GitHub Actions)のJSON配列に追記する
+
+`X_ACCOUNTS_JSON`の形式:
+```json
+[
+  {"name": "account1", "accessToken": "...", "accessSecret": "..."},
+  {"name": "account2", "accessToken": "...", "accessSecret": "..."}
+]
+```
+
+`npm run x-whoami -- <account名>` で、その名前がどのXアカウントに紐づいているか確認できる。
+
+複数アカウントを認可する場合、一時ファイル`.x-oauth-temp.json`を使い回すため、1アカウントずつ`start`→`finish`を完了させてから次に進むこと(並行実行不可)。
+
+`npm run generate`は`X_ACCOUNTS_JSON`に登録された全アカウント分を順番に処理する(投稿頻度・重複防止の判定はアカウントごとに独立)。1アカウントの失敗が他アカウントの処理を止めることはない。
 
 ## コマンド
 
@@ -64,6 +90,7 @@ GitHub Actionsの`schedule`は数時間単位で遅延・スキップされる�
 
 - `ANTHROPIC_API_KEY`
 - `FANZA_API_ID` / `FANZA_AFFILIATE_ID`
-- `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET`
+- `X_API_KEY` / `X_API_SECRET`
+- `X_ACCOUNTS_JSON`
 
 `GITHUB_TOKEN`はActions上で自動付与される。

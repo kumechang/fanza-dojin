@@ -61,12 +61,12 @@ function createTestDb(): Database.Database {
 // createdAtIso: ISO 8601 ("...T...Z")で受け取り、SQLiteのCURRENT_TIMESTAMPと同じ
 // "YYYY-MM-DD HH:MM:SS" 形式(スペース区切り、Zなし)に変換して保存する。
 // 本番のcreated_atは常にこの形式で入るため、テストデータもそれに合わせる。
-function insertPost(db: Database.Database, createdAtIso: string): void {
+function insertPost(db: Database.Database, accountName: string, createdAtIso: string): void {
   const sqliteFormat = createdAtIso.replace("T", " ").replace("Z", "");
   db.prepare(
-    `INSERT INTO posts (platform, content_id, title, affiliate_url, sample_image_urls, status, created_at)
-     VALUES ('X', 'test001', 'test title', 'https://example.com', '[]', 'pending_approval', ?)`
-  ).run(sqliteFormat);
+    `INSERT INTO posts (platform, account_name, content_id, title, affiliate_url, sample_image_urls, status, created_at)
+     VALUES ('X', ?, 'test001', 'test title', 'https://example.com', '[]', 'pending_approval', ?)`
+  ).run(accountName, sqliteFormat);
 }
 
 describe("shouldGenerateNow", () => {
@@ -83,21 +83,31 @@ describe("shouldGenerateNow", () => {
 
   it("refuses to generate within minSpacingHours of the last post", () => {
     // 直近投稿が30分前(minSpacingHours=2時間未満)
-    insertPost(db, "2026-08-30T00:30:00Z"); // JST 09:30
+    insertPost(db, "account1", "2026-08-30T00:30:00Z"); // JST 09:30
     const now = new Date("2026-08-30T01:00:00Z"); // JST 10:00, 30分後
-    expect(shouldGenerateNow(db, config, now)).toBe(false);
+    expect(shouldGenerateNow(db, config, now, "account1")).toBe(false);
   });
 
   it("always generates once the target is unmet and it's the last active hour", () => {
     const now = new Date("2026-08-29T13:30:00Z"); // JST 22:30 (endHour=23の最終アクティブ時間)
-    expect(shouldGenerateNow(db, config, now)).toBe(true);
+    expect(shouldGenerateNow(db, config, now, "account1")).toBe(true);
   });
 
   it("never generates once today's target has already been met", () => {
     for (let i = 0; i < 4; i++) {
-      insertPost(db, `2026-08-30T0${i}:00:00Z`); // すべてJST内の今日
+      insertPost(db, "account1", `2026-08-30T0${i}:00:00Z`); // すべてJST内の今日
     }
     const now = new Date("2026-08-30T05:00:00Z"); // JST 14:00
-    expect(shouldGenerateNow(db, config, now)).toBe(false);
+    expect(shouldGenerateNow(db, config, now, "account1")).toBe(false);
+  });
+
+  it("does not let another account's posts affect this account's target/spacing", () => {
+    // account2が直近30分前・当日4件投稿していても、account1の判定には影響しない
+    insertPost(db, "account2", "2026-08-30T00:30:00Z");
+    for (let i = 0; i < 4; i++) {
+      insertPost(db, "account2", `2026-08-30T0${i}:00:00Z`);
+    }
+    const now = new Date("2026-08-29T13:30:00Z"); // JST 22:30, account1は無投稿
+    expect(shouldGenerateNow(db, config, now, "account1")).toBe(true);
   });
 });

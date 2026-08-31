@@ -27,11 +27,12 @@ import { hasXCredentials } from "../lib/env.js";
 // 既に投稿済みの部分を重複投稿しない。
 export async function finalizeApprovedPost(db: Database.Database, config: AppConfig, post: PostRow): Promise<void> {
   const issueNumber = post.github_issue_number && post.github_issue_number > 0 ? post.github_issue_number : null;
+  const accountName = post.account_name;
 
-  if (!hasXCredentials()) {
+  if (!hasXCredentials(accountName)) {
     // X APIキー未取得ではin_reply_toによるスレッド構造を模擬できないため、
     // ドライランはここで完結させる(個別ツイートのドライラン合成はしない)。
-    logger.warn("X API credentials not configured, skipping actual post (dry-run)", { postId: post.id });
+    logger.warn("X API credentials not configured, skipping actual post (dry-run)", { accountName, postId: post.id });
     markPostedDryRun(db, post.id);
     if (issueNumber) {
       await closeIssueWithResult(
@@ -49,8 +50,8 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
     // ① 先頭ツイート(タイトル+先頭imagesPerTweet枚)。まだ投稿していなければ実行する。
     if ((JSON.parse(current.thread_tweet_ids) as string[]).length === 0) {
       const leadImages = sampleImageUrls.slice(0, config.fanza.imagesPerTweet);
-      const mediaIds = leadImages.length > 0 ? await downloadAndUpload(leadImages) : undefined;
-      const result = await postTweet(current.title, config.xCharLimit, mediaIds);
+      const mediaIds = leadImages.length > 0 ? await downloadAndUpload(accountName, leadImages) : undefined;
+      const result = await postTweet(accountName, current.title, config.xCharLimit, mediaIds);
       setLeadTweet(db, current.id, result.tweetId, result.tweetUrl);
       appendThreadTweet(db, current.id, result.tweetId, leadImages.length);
       current = requirePost(db, current.id);
@@ -61,8 +62,8 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
     for (const chunk of chunkImages(remainingImages, config.fanza.imagesPerTweet)) {
       const threadIds = JSON.parse(current.thread_tweet_ids) as string[];
       const lastTweetId = threadIds[threadIds.length - 1]!;
-      const mediaIds = await downloadAndUpload(chunk);
-      const result = await postReply("", lastTweetId, config.xCharLimit, mediaIds);
+      const mediaIds = await downloadAndUpload(accountName, chunk);
+      const result = await postReply(accountName, "", lastTweetId, config.xCharLimit, mediaIds);
       appendThreadTweet(db, current.id, result.tweetId, chunk.length);
       current = requirePost(db, current.id);
     }
@@ -71,7 +72,7 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
     if (!current.affiliate_tweet_posted) {
       const threadIds = JSON.parse(current.thread_tweet_ids) as string[];
       const lastTweetId = threadIds[threadIds.length - 1]!;
-      const result = await postReply(current.affiliate_url, lastTweetId, config.xCharLimit);
+      const result = await postReply(accountName, current.affiliate_url, lastTweetId, config.xCharLimit);
       markAffiliateTweetPosted(db, current.id, result.tweetId);
       current = requirePost(db, current.id);
     }
@@ -80,7 +81,7 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
     if (issueNumber) {
       await closeIssueWithResult(issueNumber, `投稿しました: ${current.tweet_url ?? ""}`);
     }
-    logger.info("post finalized", { postId: post.id, tweetUrl: current.tweet_url });
+    logger.info("post finalized", { accountName, postId: post.id, tweetUrl: current.tweet_url });
   } catch (error) {
     const message =
       error instanceof TweetTooLongError
@@ -97,9 +98,9 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
   }
 }
 
-async function downloadAndUpload(urls: string[]): Promise<string[]> {
+async function downloadAndUpload(accountName: string, urls: string[]): Promise<string[]> {
   const images = await Promise.all(urls.map((url) => downloadImage(url)));
-  return uploadImages(images);
+  return uploadImages(accountName, images);
 }
 
 function requirePost(db: Database.Database, id: number): PostRow {

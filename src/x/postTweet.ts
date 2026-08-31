@@ -24,19 +24,24 @@ function toMediaPayload(mediaIds: string[] | undefined): Partial<SendTweetV2Para
 // セルフチェック済みの本文をここで黙って切り詰めると意味が変わってしまうため、
 // 超過時は投稿せず例外として扱う。
 // mediaIds: 画像スレッド投稿用。指定するとv2.tweetにmedia.media_idsとして渡す(本文が空文字でも画像のみで投稿できる)。
-export async function postTweet(text: string, charLimit: number, mediaIds?: string[]): Promise<PostTweetResult> {
+export async function postTweet(
+  accountName: string,
+  text: string,
+  charLimit: number,
+  mediaIds?: string[]
+): Promise<PostTweetResult> {
   const weightedLength = getWeightedLength(text);
   if (weightedLength > charLimit) {
     throw new TweetTooLongError(`tweet exceeds char limit: ${weightedLength} > ${charLimit}`);
   }
 
-  if (!hasXCredentials()) {
+  if (!hasXCredentials(accountName)) {
     // X APIキー未取得の現段階では、ここで処理を止めずログのみでドライラン扱いにする。
-    logger.warn("X API credentials not configured, skipping actual post (dry-run)", { text, mediaIds });
+    logger.warn("X API credentials not configured, skipping actual post (dry-run)", { accountName, text, mediaIds });
     return { dryRun: true, tweetId: "", tweetUrl: "" };
   }
 
-  const result = await getXClient().v2.tweet(text, toMediaPayload(mediaIds));
+  const result = await getXClient(accountName).v2.tweet(text, toMediaPayload(mediaIds));
   const tweetId = result.data.id;
   return {
     dryRun: false,
@@ -47,6 +52,7 @@ export async function postTweet(text: string, charLimit: number, mediaIds?: stri
 
 // 画像スレッドのリプライ版。文字数ガード・ドライラン挙動・mediaIdsの扱いはpostTweetと同じ。
 export async function postReply(
+  accountName: string,
   text: string,
   inReplyToTweetId: string,
   charLimit: number,
@@ -57,12 +63,17 @@ export async function postReply(
     throw new TweetTooLongError(`reply exceeds char limit: ${weightedLength} > ${charLimit}`);
   }
 
-  if (!hasXCredentials()) {
-    logger.warn("X API credentials not configured, skipping actual reply (dry-run)", { text, inReplyToTweetId, mediaIds });
+  if (!hasXCredentials(accountName)) {
+    logger.warn("X API credentials not configured, skipping actual reply (dry-run)", {
+      accountName,
+      text,
+      inReplyToTweetId,
+      mediaIds,
+    });
     return { dryRun: true, tweetId: "", tweetUrl: "" };
   }
 
-  const result = await getXClient().v2.reply(text, inReplyToTweetId, toMediaPayload(mediaIds));
+  const result = await getXClient(accountName).v2.reply(text, inReplyToTweetId, toMediaPayload(mediaIds));
   const tweetId = result.data.id;
   return {
     dryRun: false,

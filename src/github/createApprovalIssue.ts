@@ -7,6 +7,7 @@ import { logger } from "../lib/logger.js";
 export const PENDING_APPROVAL_LABEL = "pending-approval";
 
 export interface ApprovalIssueContent {
+  accountName: string;
   title: string;
   price: number | null;
   listPrice: number | null;
@@ -74,7 +75,8 @@ export async function createApprovalIssue(content: ApprovalIssueContent): Promis
     return { number: -1, url: "" };
   }
 
-  const title = `投稿承認: ${content.title.slice(0, TITLE_MAX_LENGTH)}`;
+  const prefix = `投稿承認: [${content.accountName}] `;
+  const title = `${prefix}${content.title.slice(0, Math.max(0, TITLE_MAX_LENGTH - prefix.length))}`;
   const body = buildIssueBody(content);
 
   const { data } = await getOctokit().issues.create({
@@ -82,7 +84,7 @@ export async function createApprovalIssue(content: ApprovalIssueContent): Promis
     repo: repo.repo,
     title,
     body,
-    labels: [PENDING_APPROVAL_LABEL],
+    labels: [PENDING_APPROVAL_LABEL, `account:${content.accountName}`],
   });
 
   return { number: data.number, url: data.html_url };

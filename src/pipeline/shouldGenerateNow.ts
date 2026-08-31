@@ -34,14 +34,16 @@ export function countRemainingActiveHours(now: Date, config: AppConfig): number 
 
 // 実際に今回generate-postsで投稿候補を作るべきかどうかを判定する。
 // minSpacingHours未満での連投を防いだ上で、computePostingProbabilityの確率で決める。
-export function shouldGenerateNow(db: Database.Database, config: AppConfig, now: Date): boolean {
-  const lastCreatedAt = getLastPostCreatedAt(db);
+// 目標投稿数・直近投稿間隔はアカウントごとに独立して判定する(1アカウントの投稿が他アカウントの
+// 生成を足止めしないようにするため)。
+export function shouldGenerateNow(db: Database.Database, config: AppConfig, now: Date, accountName: string): boolean {
+  const lastCreatedAt = getLastPostCreatedAt(db, accountName);
   if (lastCreatedAt) {
     const hoursSinceLast = (now.getTime() - parseDbTimestamp(lastCreatedAt).getTime()) / (1000 * 60 * 60);
     if (hoursSinceLast < config.minSpacingHours) return false;
   }
 
-  const createdToday = countPostsCreatedOnJstDate(db, getJstDateString(now));
+  const createdToday = countPostsCreatedOnJstDate(db, accountName, getJstDateString(now));
   const remainingTarget = config.targetPostsPerDay - createdToday;
   const remainingActiveHours = countRemainingActiveHours(now, config);
   const hourWeight = getWeight(db, getJstHour(now));

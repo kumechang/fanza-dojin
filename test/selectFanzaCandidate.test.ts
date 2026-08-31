@@ -15,9 +15,10 @@ function createTestDb(): Database.Database {
   return db;
 }
 
-function markUsed(db: Database.Database, contentId: string): void {
+function markUsed(db: Database.Database, accountName: string, contentId: string): void {
   const id = createPost(db, {
     platform: "X",
+    account_name: accountName,
     content_id: contentId,
     title: "used",
     affiliate_url: "https://example.com",
@@ -78,19 +79,31 @@ describe("selectFanzaCandidate", () => {
       totalCount: 2,
     });
 
-    const result = await selectFanzaCandidate(db, baseConfig(), fetchFn);
+    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
     expect(result?.item.content_id).toBe("a1");
   });
 
   it("skips items that have already been used (approved/posted)", async () => {
-    markUsed(db, "a1");
+    markUsed(db, "account1", "a1");
     const fetchFn = async (): Promise<FetchItemListResult> => ({
       items: [comicItem("a1"), comicItem("a2")],
       totalCount: 2,
     });
 
-    const result = await selectFanzaCandidate(db, baseConfig(), fetchFn);
+    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
     expect(result?.item.content_id).toBe("a2");
+  });
+
+  it("does not exclude a content_id used by a different account", async () => {
+    markUsed(db, "account2", "a1");
+    const fetchFn = async (): Promise<FetchItemListResult> => ({
+      items: [comicItem("a1"), comicItem("a2")],
+      totalCount: 2,
+    });
+
+    // 重複防止はアカウント単位のみ。account2が使用済みでもaccount1からは選べる(要件通り)。
+    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
+    expect(result?.item.content_id).toBe("a1");
   });
 
   it("skips non-comic items (imageURL path not under /digital/comic/)", async () => {
@@ -102,7 +115,7 @@ describe("selectFanzaCandidate", () => {
       totalCount: 2,
     });
 
-    const result = await selectFanzaCandidate(db, baseConfig(), fetchFn);
+    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
     expect(result?.item.content_id).toBe("a2");
   });
 
@@ -112,7 +125,7 @@ describe("selectFanzaCandidate", () => {
       totalCount: 2,
     });
 
-    const result = await selectFanzaCandidate(db, baseConfig(), fetchFn);
+    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
     expect(result?.item.content_id).toBe("a2");
   });
 
@@ -123,14 +136,14 @@ describe("selectFanzaCandidate", () => {
       return { items: [comicItem(`unused-but-not-eligible-${params.offset}`, { campaign: undefined })], totalCount: 1 };
     };
 
-    const result = await selectFanzaCandidate(db, baseConfig(), fetchFn);
+    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
     expect(result).toBeNull();
     expect(offsetsSeen).toEqual([1, 101, 201]);
   });
 
   it("stops early when a page returns no items", async () => {
     const fetchFn = async (): Promise<FetchItemListResult> => ({ items: [], totalCount: 0 });
-    const result = await selectFanzaCandidate(db, baseConfig(), fetchFn);
+    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
     expect(result).toBeNull();
   });
 });

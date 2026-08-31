@@ -13,6 +13,7 @@ export type PostStatus =
 
 export interface CreatePostInput {
   platform: string;
+  account_name: string;
   content_id: string;
   title: string;
   affiliate_url: string;
@@ -30,6 +31,7 @@ export interface CreatePostInput {
 export interface PostRow {
   id: number;
   platform: string;
+  account_name: string;
   content_id: string;
   title: string;
   affiliate_url: string;
@@ -64,11 +66,12 @@ export interface PostRow {
 export function createPost(db: Database.Database, input: CreatePostInput): number {
   const result = db
     .prepare(
-      `INSERT INTO posts (platform, content_id, title, affiliate_url, sample_image_urls, price, list_price, campaign_title, genre_names, review_count, review_average, fetch_offset, status, run_id, updated_at)
-       VALUES (@platform, @content_id, @title, @affiliate_url, @sample_image_urls, @price, @list_price, @campaign_title, @genre_names, @review_count, @review_average, @fetch_offset, 'pending_approval', @run_id, CURRENT_TIMESTAMP)`
+      `INSERT INTO posts (platform, account_name, content_id, title, affiliate_url, sample_image_urls, price, list_price, campaign_title, genre_names, review_count, review_average, fetch_offset, status, run_id, updated_at)
+       VALUES (@platform, @account_name, @content_id, @title, @affiliate_url, @sample_image_urls, @price, @list_price, @campaign_title, @genre_names, @review_count, @review_average, @fetch_offset, 'pending_approval', @run_id, CURRENT_TIMESTAMP)`
     )
     .run({
       platform: input.platform,
+      account_name: input.account_name,
       content_id: input.content_id,
       title: input.title,
       affiliate_url: input.affiliate_url,
@@ -99,32 +102,35 @@ export function getPostByIssueNumber(db: Database.Database, issueNumber: number)
   return db.prepare(`SELECT * FROM posts WHERE github_issue_number = ?`).get(issueNumber) as PostRow | undefined;
 }
 
-// selectFanzaCandidate用: 既に候補になったことがある(=もう一度紹介する必要がない)content_idの集合。
-// 却下・投稿失敗は限られたセール在庫の中で再候補になり得るため除外対象に含めない
-// (承認済み・投稿済みのものだけを「もう紹介した」とみなす)。
-export function getUsedContentIds(db: Database.Database): Set<string> {
+// selectFanzaCandidate用: 指定アカウントが既に候補にしたことがある(=もう一度紹介する必要がない)
+// content_idの集合。却下・投稿失敗は限られたセール在庫の中で再候補になり得るため除外対象に含めない
+// (承認済み・投稿済みのものだけを「もう紹介した」とみなす)。他アカウントとの重複はチェックしない
+// (アカウント間で同じ作品が被ることは許容する)。
+export function getUsedContentIds(db: Database.Database, accountName: string): Set<string> {
   const rows = db
-    .prepare(`SELECT DISTINCT content_id FROM posts WHERE status IN ('approved', 'posted', 'posted_dryrun')`)
-    .all() as { content_id: string }[];
+    .prepare(
+      `SELECT DISTINCT content_id FROM posts WHERE account_name = ? AND status IN ('approved', 'posted', 'posted_dryrun')`
+    )
+    .all(accountName) as { content_id: string }[];
   return new Set(rows.map((row) => row.content_id));
 }
 
-// shouldGenerateNow用: 指定したJSTカレンダー日に生成された投稿候補数(承認/却下/投稿結果を問わない)。
-// SQLでは前後1日を粗く絞り込み、JST日付の厳密な判定はJS側で行う
+// shouldGenerateNow用: 指定アカウントが指定したJSTカレンダー日に生成した投稿候補数
+// (承認/却下/投稿結果を問わない)。SQLでは前後1日を粗く絞り込み、JST日付の厳密な判定はJS側で行う
 // (created_atはUTCで保存されているため)。
-export function countPostsCreatedOnJstDate(db: Database.Database, jstDateString: string): number {
+export function countPostsCreatedOnJstDate(db: Database.Database, accountName: string, jstDateString: string): number {
   const rows = db
     .prepare(
       `SELECT created_at FROM posts
-       WHERE created_at >= datetime(?, '-1 day') AND created_at <= datetime(?, '+1 day')`
+       WHERE account_name = ? AND created_at >= datetime(?, '-1 day') AND created_at <= datetime(?, '+1 day')`
     )
-    .all(jstDateString, jstDateString) as { created_at: string }[];
+    .all(accountName, jstDateString, jstDateString) as { created_at: string }[];
   return rows.filter((row) => getJstDateString(parseDbTimestamp(row.created_at)) === jstDateString).length;
 }
 
-// shouldGenerateNow用: 直近の投稿候補作成日時。minSpacingHoursの間隔判定に使う。
-export function getLastPostCreatedAt(db: Database.Database): string | null {
-  const row = db.prepare(`SELECT MAX(created_at) as last_created FROM posts`).get() as {
+// shouldGenerateNow用: 指定アカウントの直近の投稿候補作成日時。minSpacingHoursの間隔判定に使う。
+export function getLastPostCreatedAt(db: Database.Database, accountName: string): string | null {
+  const row = db.prepare(`SELECT MAX(created_at) as last_created FROM posts WHERE account_name = ?`).get(accountName) as {
     last_created: string | null;
   };
   return row.last_created;

@@ -5,6 +5,7 @@
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   platform TEXT NOT NULL DEFAULT 'X',
+  account_name TEXT NOT NULL DEFAULT '', -- X_ACCOUNTS_JSONのname。投稿履歴・重複防止・投稿頻度制御をアカウント単位で行うためのキー
 
   -- FANZA ItemList APIから取得した候補の情報(取得時点のスナップショット)。
   content_id TEXT NOT NULL, -- FANZA側の商品ID。UNIQUE制約は付けない(却下/投稿失敗した作品は
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_status ON posts(status);
 CREATE INDEX IF NOT EXISTS idx_posts_content_id ON posts(content_id);
+CREATE INDEX IF NOT EXISTS idx_posts_account_status ON posts(account_name, status);
 
 -- 投稿ごとのエンゲージメントを「最新値で上書き」ではなくスナップショットとして時系列に蓄積する
 -- (将来のフィードバックループ用。engagement_rateは記録時点で計算して保存)。

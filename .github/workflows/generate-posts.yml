@@ -46,8 +46,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          X_ACCOUNTS_JSON: ${{ secrets.X_ACCOUNTS_JSON }}
         run: npm run generate
 
       # SQLiteは外部ホスティングせずリポジトリに置いているため、実行後の状態をbotコミットで戻す。

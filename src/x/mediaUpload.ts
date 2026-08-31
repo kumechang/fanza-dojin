@@ -44,10 +44,12 @@ export async function downloadImage(url: string): Promise<DownloadedImage> {
 }
 
 // ダウンロード済み画像をXにアップロードし、media_idの配列を返す(v2.tweet/replyのmedia_idsに渡す)。
-export async function uploadImages(images: DownloadedImage[]): Promise<string[]> {
+// media_idはアップロードしたアカウントのトークンに紐づくため、そのままでは別アカウントの
+// ツイートには添付できない。必ず投稿先と同じaccountNameでアップロードすること。
+export async function uploadImages(accountName: string, images: DownloadedImage[]): Promise<string[]> {
   const mediaIds: string[] = [];
   for (const image of images) {
-    const mediaId = await getXClient().v1.uploadMedia(image.buffer, { mimeType: image.mimeType });
+    const mediaId = await getXClient(accountName).v1.uploadMedia(image.buffer, { mimeType: image.mimeType });
     mediaIds.push(mediaId);
   }
   return mediaIds;
