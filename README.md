@@ -8,7 +8,7 @@ FANZA ItemList APIから同人ジャンル(`service=doujin`, `floor=digital_douj
 2. リプライでサンプル画像を2枚ずつ、全サンプル画像を貼り終えるまで続ける
 3. 最後のリプライでアフィリエイトリンクを貼る
 
-承認モードは`config/app.json`の`approvalMode`で`"manual"` / `"auto"`を切り替え可能(成人向けコンテンツのため既定は`"manual"`)。
+承認モードは`config/app.json`の`approvalMode`で`"manual"` / `"auto"`を切り替え可能。現在は`"auto"`(選定された候補をそのまま投稿する)で運用している。誤ったコンテンツが投稿されるリスクがあるため、選定ロジック(`src/fanza/filterCandidates.ts`)を変更した際は特に注意すること。
 
 **複数のXアカウントで同時に運用できる**(それぞれ別の作品を投稿する)。アカウント間の重複投稿防止は行わない(たまたま同じ作品が被ることは許容する)。
 
