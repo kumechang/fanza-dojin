@@ -1,12 +1,12 @@
 # 週1回、投稿ごとのエンゲージメント実績を時間帯別に集計してClaudeに分析させ、
 # posting_time_weights を更新する。shouldGenerateNow(生成パイプライン)がこの重みを
 # 参照し、反応の良い時間帯を優先して投稿候補を作るようになる。
+#
+# GitHub Actionsの`schedule`トリガーが実測で数時間単位の遅延を起こすことが確認されたため、
+# `schedule`は使わず外部のcron-job.orgから週1回`workflow_dispatch` APIを叩いてもらう方式にしている。
 name: Analyze Posting Times
 
 on:
-  schedule:
-    # 毎週日曜 JST 09:37 (UTC 00:37)
-    - cron: "37 0 * * 0"
   workflow_dispatch: {}
 
 concurrency:

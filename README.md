@@ -95,14 +95,31 @@ npm run typecheck
 
 ## GitHub Actions
 
-- `generate-posts.yml`: 投稿可能時間帯(`postingWindow`、既定JST 7時〜翌2時。日をまたぐ時間帯は`startHour > endHour`で表現する)の間、30分おきに投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断する。`approvalMode: "auto"`の場合はその場で投稿(検閲含む)まで行うため、`approvalMode`が`"auto"`のときだけPythonセットアップ・検閲モデルのキャッシュ復元を行い、`"manual"`(既定)ではスキップしてActions実行時間を節約する。
+- `generate-posts.yml`: FANZAの値引き中×人気の高い同人コミックから投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断し、投稿可能時間帯(`postingWindow`、既定JST 7時〜翌2時)の外であればアプリ側(`isWithinPostingWindow`)でスキップする。`approvalMode: "auto"`の場合はその場で投稿(検閲含む)まで行うため、`approvalMode`が`"auto"`のときだけPythonセットアップ・検閲モデルのキャッシュ復元を行い、`"manual"`(既定)ではスキップしてActions実行時間を節約する。
 - `handle-approval.yml`: Issueコメントに「承認」/「却下」と書かれたら処理(`pending-approval`ラベルが付いたIssueのみ反応)。承認時は画像検閲を伴うため、承認モードによらず毎回Pythonセットアップを行う。
-- `collect-metrics.yml`: 毎日、投稿済みツイートのエンゲージメントを取得し`post_metrics`に記録。
-- `analyze-posting-times.yml`: 週1回、`post_metrics`を時間帯別に集計しClaudeに分析させ、`posting_time_weights`(反応の良い時間帯ほど高い重み)を更新する。データが少ない(投稿済み10件未満)うちは分析をスキップし、重みは既定の均等のまま。
+- `collect-metrics.yml`: 投稿済みツイートのエンゲージメントを取得し`post_metrics`に記録。
+- `analyze-posting-times.yml`: `post_metrics`を時間帯別に集計しClaudeに分析させ、`posting_time_weights`(反応の良い時間帯ほど高い重み)を更新する。データが少ない(投稿済み10件未満)うちは分析をスキップし、重みは既定の均等のまま。
 
 いずれも`data/app.db`(SQLite)を実行後にbotコミットしてリポジトリに戻す。DB書き込みが競合しないよう`concurrency: db-write`グループを共有。
 
-GitHub Actionsの`schedule`は数時間単位で遅延・スキップされることがある(GitHub側の既知の制限)。30分おきに起動しているのはこの影響を緩和するためで、`generate-posts.yml`が`postingWindow`の範囲外に実行された場合は投稿候補を作らずスキップする。
+### スケジュール実行(cron-job.org)
+
+GitHub Actionsの`schedule`トリガーは実測で30分間隔の設定に対し実際は5〜6時間に1回程度しか発火しないという著しい遅延が確認された(GitHub側の既知の制限で、間隔を短くしても改善しない)。そのため上記3つのworkflowはいずれも`schedule`を使わず、`workflow_dispatch`のみを起点とし、外部の[cron-job.org](https://cron-job.org/)から一定間隔でGitHubの`workflow_dispatch` APIを叩く方式にしている。
+
+cron-job.org側で以下のジョブを設定する(いずれもURLの`{owner}/{repo}`は`kumechang/fanza-dojin`):
+
+| ジョブ | 頻度 | URL |
+| --- | --- | --- |
+| Generate Posts | 30分おき(24時間、時間帯判定はアプリ側で行うため常時叩いてよい) | `https://api.github.com/repos/{owner}/{repo}/actions/workflows/generate-posts.yml/dispatches` |
+| Collect Metrics | 毎日1回 | `https://api.github.com/repos/{owner}/{repo}/actions/workflows/collect-metrics.yml/dispatches` |
+| Analyze Posting Times | 週1回 | `https://api.github.com/repos/{owner}/{repo}/actions/workflows/analyze-posting-times.yml/dispatches` |
+
+各ジョブの設定:
+- Method: `POST`
+- Headers: `Authorization: Bearer <GitHubのPersonal Access Token>` / `Accept: application/vnd.github+json` / `X-GitHub-Api-Version: 2022-11-28`
+- Body(JSON): `{"ref":"main"}`
+
+PATはこのリポジトリに対して`Actions: Read and write`権限を持つfine-grained PAT(GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens)を発行し、cron-job.org側にのみ登録する(GitHub Secretsには登録不要)。有効期限が切れると全ジョブが失敗するため、期限が近づいたら更新する。
 
 ### 必要なSecrets
 

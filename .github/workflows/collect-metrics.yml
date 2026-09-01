@@ -1,11 +1,10 @@
 # 投稿済みツイートのエンゲージメント(いいね・リポスト等)を毎日取得し、フィードバックループの材料にする。
+#
+# GitHub Actionsの`schedule`トリガーが実測で数時間単位の遅延を起こすことが確認されたため、
+# `schedule`は使わず外部のcron-job.orgから毎日1回`workflow_dispatch` APIを叩いてもらう方式にしている。
 name: Collect Metrics
 
 on:
-  schedule:
-    # JST 08:27 (UTC 23:27 前日)
-    # 毎時0分ちょうどは混雑で遅延・スキップされやすいため分をずらしている。
-    - cron: "27 23 * * *"
   workflow_dispatch: {}
 
 concurrency:
