@@ -2,11 +2,17 @@
 # posting_time_weights を更新する。shouldGenerateNow(生成パイプライン)がこの重みを
 # 参照し、反応の良い時間帯を優先して投稿候補を作るようになる。
 #
-# GitHub Actionsの`schedule`トリガーが実測で数時間単位の遅延を起こすことが確認されたため、
-# `schedule`は使わず外部のcron-job.orgから週1回`workflow_dispatch` APIを叩いてもらう方式にしている。
+# 主経路は外部のcron-job.orgから週1回`workflow_dispatch` APIを叩いてもらう方式(README参照)。
+# GitHub Actionsの`schedule`は30分間隔のGenerate Postsだと実測5〜6時間遅延して実用にならなかったが、
+# 本ワークフローは週1回で数時間の遅延は無視できるため、cron-job.org側の設定漏れ・失敗時の
+# フォールバックとして`schedule`も残す(実測で本ワークフローは移行後一度も実行された形跡が
+# なかったため、二重化した)。
 name: Analyze Posting Times
 
 on:
+  schedule:
+    # 毎週日曜 JST 09:37 (UTC 00:37) — cron-job.org側の設定漏れ・失敗時のフォールバック
+    - cron: "37 0 * * 0"
   workflow_dispatch: {}
 
 concurrency:

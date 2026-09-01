@@ -9,15 +9,20 @@ export interface PostingProbabilityContext {
   remainingActiveHours: number;
   hourWeight: number;
   averageWeight: number;
+  minSpacingHours: number;
 }
 
 // 純粋関数: 今この瞬間に投稿候補を作るべき確率(0〜1)を計算する。
 // - 目標を既に満たしていれば0
-// - その日最後のアクティブ時間なら、未達分を取りこぼさないよう1(必ず生成)
+// - 残り時間で残り目標をminSpacingHours間隔に詰め込んでもギリギリ間に合うかどうかの
+//   締切(remainingTarget * minSpacingHours時間)を切ったら、未達分を取りこぼさないよう
+//   確率に関わらず必ず生成する(1日の最低投稿数を割り込ませないためのフェイルセーフ)
 // - それ以外は「残り目標 / 残り時間」を基準に、時間帯の重み(過去のエンゲージメント傾向)で補正する
 export function computePostingProbability(ctx: PostingProbabilityContext): number {
   if (ctx.remainingTarget <= 0) return 0;
-  if (ctx.remainingActiveHours <= 1) return 1;
+
+  const deadlineHours = ctx.remainingTarget * ctx.minSpacingHours;
+  if (ctx.remainingActiveHours <= deadlineHours) return 1;
 
   const baseProbability = ctx.remainingTarget / ctx.remainingActiveHours;
   const weightRatio = ctx.averageWeight > 0 ? ctx.hourWeight / ctx.averageWeight : 1;
@@ -56,6 +61,7 @@ export function shouldGenerateNow(db: Database.Database, config: AppConfig, now:
     remainingActiveHours,
     hourWeight,
     averageWeight,
+    minSpacingHours: config.minSpacingHours,
   });
 
   return Math.random() < probability;

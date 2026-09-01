@@ -8,22 +8,57 @@ import type { AppConfig } from "../src/config/types.js";
 describe("computePostingProbability", () => {
   it("returns 0 once the daily target is already met", () => {
     expect(
-      computePostingProbability({ remainingTarget: 0, remainingActiveHours: 5, hourWeight: 1, averageWeight: 1 })
+      computePostingProbability({
+        remainingTarget: 0,
+        remainingActiveHours: 5,
+        hourWeight: 1,
+        averageWeight: 1,
+        minSpacingHours: 2,
+      })
     ).toBe(0);
     expect(
-      computePostingProbability({ remainingTarget: -1, remainingActiveHours: 5, hourWeight: 1, averageWeight: 1 })
+      computePostingProbability({
+        remainingTarget: -1,
+        remainingActiveHours: 5,
+        hourWeight: 1,
+        averageWeight: 1,
+        minSpacingHours: 2,
+      })
     ).toBe(0);
   });
 
-  it("returns 1 on the last active hour of the day so the target isn't missed", () => {
+  it("returns 1 once remaining time no longer has slack beyond what minSpacingHours requires, so the target isn't missed", () => {
+    // remainingTarget(2) * minSpacingHours(2) = 4時間が締切。remainingActiveHoursがそれ以下なら必ず生成する。
     expect(
-      computePostingProbability({ remainingTarget: 2, remainingActiveHours: 1, hourWeight: 1, averageWeight: 1 })
+      computePostingProbability({
+        remainingTarget: 2,
+        remainingActiveHours: 4,
+        hourWeight: 1,
+        averageWeight: 1,
+        minSpacingHours: 2,
+      })
+    ).toBe(1);
+    expect(
+      computePostingProbability({
+        remainingTarget: 2,
+        remainingActiveHours: 1,
+        hourWeight: 1,
+        averageWeight: 1,
+        minSpacingHours: 2,
+      })
     ).toBe(1);
   });
 
-  it("spreads evenly when weights are equal", () => {
+  it("still spreads probabilistically while there is slack beyond the minSpacingHours deadline", () => {
+    // 締切(2*2=4時間)より残り時間が多いうちは、確率的なペース配分のまま。
     expect(
-      computePostingProbability({ remainingTarget: 2, remainingActiveHours: 8, hourWeight: 1, averageWeight: 1 })
+      computePostingProbability({
+        remainingTarget: 2,
+        remainingActiveHours: 8,
+        hourWeight: 1,
+        averageWeight: 1,
+        minSpacingHours: 2,
+      })
     ).toBeCloseTo(0.25);
   });
 
@@ -33,12 +68,14 @@ describe("computePostingProbability", () => {
       remainingActiveHours: 8,
       hourWeight: 2,
       averageWeight: 1,
+      minSpacingHours: 2,
     });
     const low = computePostingProbability({
       remainingTarget: 2,
       remainingActiveHours: 8,
       hourWeight: 0.5,
       averageWeight: 1,
+      minSpacingHours: 2,
     });
     expect(high).toBeCloseTo(0.5);
     expect(low).toBeCloseTo(0.125);
@@ -46,7 +83,13 @@ describe("computePostingProbability", () => {
 
   it("clamps the result to [0, 1]", () => {
     expect(
-      computePostingProbability({ remainingTarget: 10, remainingActiveHours: 2, hourWeight: 5, averageWeight: 1 })
+      computePostingProbability({
+        remainingTarget: 10,
+        remainingActiveHours: 2,
+        hourWeight: 5,
+        averageWeight: 1,
+        minSpacingHours: 2,
+      })
     ).toBe(1);
   });
 });
@@ -104,6 +147,13 @@ describe("shouldGenerateNow", () => {
 
   it("always generates once the target is unmet and it's the last active hour", () => {
     const now = new Date("2026-08-29T13:30:00Z"); // JST 22:30 (endHour=23の最終アクティブ時間)
+    expect(shouldGenerateNow(db, config, now, "account1")).toBe(true);
+  });
+
+  it("forces generation well before the last hour once remaining time can no longer absorb misses (deadline safety net)", () => {
+    // target=4・minSpacingHours=2なので締切は残り8時間。まだ無投稿でJST 18:00(残り5時間、endHour=23)は
+    // 「最終アクティブ時間」ではないが、確率任せだと1日の最低投稿数を割り込みかねないため必ず生成する。
+    const now = new Date("2026-08-29T09:00:00Z"); // JST 18:00
     expect(shouldGenerateNow(db, config, now, "account1")).toBe(true);
   });
 
