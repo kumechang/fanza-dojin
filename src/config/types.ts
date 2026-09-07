@@ -30,8 +30,11 @@ export interface AppConfig {
     // 1回のfetch-candidatesバッチ実行で黒塗り要否解析(YOLO推論)を行う候補数の上限。
     // 推論コストが高いため、処理しきれない分はpendingのまま次回実行に持ち越す。
     maxAnalysisPerRun: number;
-    // 投稿候補プールの中から「黒塗りがほとんど不要」とみなして投稿対象にする、
-    // サンプル画像の黒塗り面積率(redaction_ratio)の許容上限(0〜1)。
-    maxRedactionRatio: number;
+    // サンプル画像1枚(1ページ)あたりの黒塗り面積率がこれを超えたら「投稿不可ページ」として、
+    // そのページだけをスレッドから間引く(0〜1)。
+    maxPageRedactionRatio: number;
+    // 投稿不可ページの割合がこれを超えたら、個別ページを間引くのではなく作品自体を
+    // 投稿候補から除外する(0〜1)。
+    maxUnpostablePageRatio: number;
   };
 }

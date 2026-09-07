@@ -4,8 +4,9 @@
 #
 # これをgenerate-posts(投稿タイミング)から切り離すことで、投稿時はこのプールを参照する
 # だけになり、投稿ごとのFANZA API呼び出し・候補走査分のYOLO推論が不要になる。
-# generate-postsはプールの中から「黒塗りがほとんど不要」と判定済みの候補だけを選ぶ
-# (config/app.jsonのfanza.maxRedactionRatio)。
+# generate-postsはプールの中から、ページ単位の黒塗り判定(config/app.jsonのfanza.
+# maxPageRedactionRatio/maxUnpostablePageRatio、src/fanza/redactionPolicy.ts)で
+# 投稿可能と判定された候補だけを選ぶ。
 name: Fetch Candidate Pool
 
 on:

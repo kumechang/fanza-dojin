@@ -76,7 +76,8 @@ export async function generateCandidate(db: Database.Database, config: AppConfig
     postId,
     issueNumber: issue.number,
     contentId: candidate.contentId,
-    redactionRatio: candidate.redactionRatio,
+    totalPageCount: candidate.totalPageCount,
+    droppedPageCount: candidate.droppedPageCount,
   });
 
   if (config.approvalMode === "auto") {
