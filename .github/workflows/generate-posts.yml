@@ -1,6 +1,8 @@
 # 投稿可能時間帯(config/app.jsonのpostingWindow、既定JST 7時〜翌2時、日をまたぐ)の間、
-# 30分おきに起動してFANZAの値引き中×人気の高い同人コミックを1件選び、投稿候補を生成する
-# (approvalMode: autoの場合はその場で投稿まで行う)。
+# 30分おきに起動して投稿候補プール(fetch-candidates.ymlが定期更新するfanza_candidates)
+# から、黒塗りがほとんど不要と判定済みの値引き中×人気の高い同人コミックを1件選び、
+# 投稿候補を生成する(approvalMode: autoの場合はその場で投稿まで行う)。
+# FANZA APIのライブ呼び出しはここでは行わない(プールを参照するのみ)。
 #
 # 実際に生成するかどうかはshouldGenerateNow(src/pipeline/shouldGenerateNow.ts)が
 # 1日の目標投稿数・直近投稿からの間隔・時間帯の重みをもとに判断するため、30分おきに
@@ -74,8 +76,6 @@ jobs:
 
       - name: Generate candidate post
         env:
-          FANZA_API_ID: ${{ secrets.FANZA_API_ID }}
-          FANZA_AFFILIATE_ID: ${{ secrets.FANZA_AFFILIATE_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           X_API_KEY: ${{ secrets.X_API_KEY }}

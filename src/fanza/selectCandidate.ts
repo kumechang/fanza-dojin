@@ -1,62 +1,55 @@
 import type Database from "better-sqlite3";
 import type { AppConfig } from "../config/types.js";
 import { getUsedContentIds } from "../db/repositories/postsRepo.js";
-import { fetchItemList, type FetchItemListResult } from "./client.js";
-import { isComic, isDiscounted } from "./filterCandidates.js";
-import { parsePrice } from "./priceUtils.js";
-import type { FanzaItem } from "./types.js";
+import { selectBestCandidate } from "../db/repositories/fanzaCandidatesRepo.js";
 import { logger } from "../lib/logger.js";
 
 export interface SelectedFanzaCandidate {
-  item: FanzaItem;
+  contentId: string;
+  title: string;
+  affiliateUrl: string;
+  sampleImageUrls: string[];
   price: number | null;
   listPrice: number | null;
-  fetchOffset: number;
+  campaignTitle: string | null;
+  genreNames: string[];
+  reviewCount: number | null;
+  reviewAverage: number | null;
+  rankOrder: number | null;
+  redactionRatio: number | null;
 }
 
-// FANZA ItemList APIをsort=rank(人気順)でページングしながら舐め、
-// 「値引き中 × コミック判定OK × まだ候補にしていない」に最初に合致した1件を採用する。
-// スキャン順=ランク順であることを利用し、"値引き中の中でできるだけランクが高いもの"という
-// 要件を素直に満たす。
-export async function selectFanzaCandidate(
+// 投稿候補プール(fanza_candidates、fetch-candidatesバッチが事前に取得・黒塗り要否解析
+// 済み)の中から、「黒塗りがほとんど不要(redaction_ratio <= config.fanza.maxRedactionRatio)
+// × このアカウントがまだ候補にしていない」を満たす作品を、ランクの良い順(rank_order昇順)に
+// 1件選ぶ。FANZA APIへのライブ呼び出しはここでは行わない(バッチ取得済みのプールを
+// 参照するのみ)。
+export function selectFanzaCandidate(
   db: Database.Database,
   config: AppConfig,
-  accountName: string,
-  fetchFn: (params: Parameters<typeof fetchItemList>[0]) => Promise<FetchItemListResult> = fetchItemList
-): Promise<SelectedFanzaCandidate | null> {
+  accountName: string
+): SelectedFanzaCandidate | null {
   const usedContentIds = getUsedContentIds(db, accountName);
-  const { fanza } = config;
-
-  for (let page = 0; page < fanza.maxPages; page++) {
-    const offset = page * fanza.hits + 1;
-    const { items } = await fetchFn({
-      site: fanza.site,
-      service: fanza.service,
-      floor: fanza.floor,
-      hits: fanza.hits,
-      offset,
-      sort: "rank",
+  const row = selectBestCandidate(db, usedContentIds, config.fanza.maxRedactionRatio);
+  if (!row) {
+    logger.info("no eligible pooled FANZA candidate found (pool empty or all above redaction threshold)", {
+      maxRedactionRatio: config.fanza.maxRedactionRatio,
     });
-
-    if (items.length === 0) {
-      logger.info("no more FANZA items to scan", { page, offset });
-      break;
-    }
-
-    for (const item of items) {
-      if (usedContentIds.has(item.content_id)) continue;
-      if (!isComic(item)) continue;
-      if (!isDiscounted(item)) continue;
-
-      return {
-        item,
-        price: parsePrice(item.prices?.price),
-        listPrice: parsePrice(item.prices?.list_price),
-        fetchOffset: offset,
-      };
-    }
+    return null;
   }
 
-  logger.info("no eligible FANZA candidate found within maxPages", { maxPages: fanza.maxPages });
-  return null;
+  return {
+    contentId: row.content_id,
+    title: row.title,
+    affiliateUrl: row.affiliate_url,
+    sampleImageUrls: JSON.parse(row.sample_image_urls) as string[],
+    price: row.price,
+    listPrice: row.list_price,
+    campaignTitle: row.campaign_title,
+    genreNames: row.genre_names ? (JSON.parse(row.genre_names) as string[]) : [],
+    reviewCount: row.review_count,
+    reviewAverage: row.review_average,
+    rankOrder: row.rank_order,
+    redactionRatio: row.redaction_ratio,
+  };
 }

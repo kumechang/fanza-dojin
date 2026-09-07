@@ -9,7 +9,8 @@ Node.js側 (src/x/censorImage.ts) からサブプロセスとして呼び出さ�
     "jobs": [{"input": "...", "output": "...", "classes": ["anus", "nipple", ...]}]
   }
 
-標準出力: 各ジョブの結果をJSON配列で最終行に1行出力する(検出クラス・スコア・boxを含む、ログ/デバッグ用)。
+標準出力: 各ジョブの結果をJSON配列で最終行に1行出力する(検出クラス・スコア・box・黒塗り面積率
+redactionRatioを含む、ログ/デバッグおよび投稿候補プールの黒塗り要否判定用)。
 失敗時は非ゼロで終了しstderrにエラーを出す。Node側はそれを例外として扱い、投稿しない
 (検閲に失敗したら投稿しない、というフェイルセーフはNode側のtry/catchに委ねる)。
 """
@@ -17,6 +18,7 @@ Node.js側 (src/x/censorImage.ts) からサブプロセスとして呼び出さ�
 import json
 import sys
 
+import numpy as np
 from ensure_erax_model import ensure_model
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
@@ -55,6 +57,9 @@ def main() -> None:
         classes = set(job.get("classes") or [])
         rgb = img.convert("RGB")
         draw = ImageDraw.Draw(rgb)
+        # 黒塗りに使うboxの被覆率(redaction_ratio)を、単純なbox面積の合計ではなく
+        # ピクセル単位のマスクの論理和で計算する(box同士が重なるケースでの二重カウントを防ぐため)。
+        mask = np.zeros((rgb.height, rgb.width), dtype=bool)
         matched = []
         for box in result.boxes:
             cls_name = result.names[int(box.cls[0])]
@@ -70,9 +75,17 @@ def main() -> None:
                 min(rgb.height, y2 + pad_y),
             )
             draw.rectangle(box_padded, fill="black")
+            mx1, my1, mx2, my2 = (int(round(v)) for v in box_padded)
+            mask[my1:my2, mx1:mx2] = True
             matched.append({"class": cls_name, "score": score, "box": [x1, y1, x2, y2]})
+        redaction_ratio = float(mask.sum() / mask.size) if mask.size else 0.0
         rgb.save(job["output"])
-        output.append({"input": job["input"], "output": job["output"], "detections": matched})
+        output.append({
+            "input": job["input"],
+            "output": job["output"],
+            "detections": matched,
+            "redactionRatio": redaction_ratio,
+        })
 
     print(json.dumps(output))
 

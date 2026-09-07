@@ -33,51 +33,51 @@ export async function generateCandidate(db: Database.Database, config: AppConfig
     return null;
   }
 
-  const candidate = await selectFanzaCandidate(db, config, accountName);
+  const candidate = selectFanzaCandidate(db, config, accountName);
   if (!candidate) {
     logger.info("no eligible FANZA candidate found, skipping this run", { accountName });
     return null;
   }
 
-  const { item, price, listPrice, fetchOffset } = candidate;
-  const sampleImageUrls = item.sampleImageURL?.sample_l?.image ?? [];
-  const genreNames = item.iteminfo?.genre?.map((g) => g.name).filter((n): n is string => Boolean(n)) ?? [];
-  const campaignTitle = item.campaign?.[0]?.title ?? null;
-  const reviewAverage = item.review?.average !== undefined ? Number(item.review.average) : null;
-
   const postId = createPost(db, {
     platform: config.platform,
     account_name: accountName,
-    content_id: item.content_id,
-    title: item.title,
-    affiliate_url: item.affiliateURL,
-    sample_image_urls: sampleImageUrls,
-    price,
-    list_price: listPrice,
-    campaign_title: campaignTitle,
-    genre_names: genreNames,
-    review_count: item.review?.count ?? null,
-    review_average: reviewAverage,
-    fetch_offset: fetchOffset,
+    content_id: candidate.contentId,
+    title: candidate.title,
+    affiliate_url: candidate.affiliateUrl,
+    sample_image_urls: candidate.sampleImageUrls,
+    price: candidate.price,
+    list_price: candidate.listPrice,
+    campaign_title: candidate.campaignTitle,
+    genre_names: candidate.genreNames,
+    review_count: candidate.reviewCount,
+    review_average: candidate.reviewAverage,
+    fetch_offset: candidate.rankOrder,
     run_id: env.githubRunId || null,
   });
 
   const issue = await createApprovalIssue({
     accountName,
-    title: item.title,
-    price,
-    listPrice,
-    campaignTitle,
-    reviewCount: item.review?.count ?? null,
-    reviewAverage,
-    sampleImageUrls,
-    affiliateUrl: item.affiliateURL,
+    title: candidate.title,
+    price: candidate.price,
+    listPrice: candidate.listPrice,
+    campaignTitle: candidate.campaignTitle,
+    reviewCount: candidate.reviewCount,
+    reviewAverage: candidate.reviewAverage,
+    sampleImageUrls: candidate.sampleImageUrls,
+    affiliateUrl: candidate.affiliateUrl,
   });
   if (issue.number > 0) {
     setGithubIssue(db, postId, issue.number, issue.url);
   }
 
-  logger.info("candidate created", { accountName, postId, issueNumber: issue.number, contentId: item.content_id });
+  logger.info("candidate created", {
+    accountName,
+    postId,
+    issueNumber: issue.number,
+    contentId: candidate.contentId,
+    redactionRatio: candidate.redactionRatio,
+  });
 
   if (config.approvalMode === "auto") {
     const post = getPostById(db, postId);

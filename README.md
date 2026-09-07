@@ -2,7 +2,7 @@
 
 FANZA(DMM)の同人コミックアフィリエイトを絡めたX自動投稿システム。
 
-FANZA ItemList APIから同人ジャンル(`service=doujin`, `floor=digital_doujin`)のコミック作品を検索し、値引きキャンペーン中かつその中で人気(ランク)が高い作品を1件選ぶ。GitHub Issueでの人による承認を経て、Xに以下の形式で投稿する。
+FANZA ItemList APIから同人ジャンル(`service=doujin`, `floor=digital_doujin`)の値引き中コミック作品をバッチ処理(`fetch-candidates`)で定期的に取得し、各作品のサンプル画像についてどれくらい黒塗り処理が必要か(`redaction_ratio`)を事前にDB(投稿候補プール`fanza_candidates`)へ保存しておく。投稿タイミング(`generate-posts`)では、このプールの中から「黒塗りがほとんど不要」と判定済み×人気(ランク)が高い作品を1件選ぶ(FANZA APIのライブ呼び出しはここでは行わない)。GitHub Issueでの人による承認を経て、Xに以下の形式で投稿する。
 
 1. 1件目のツイート: タイトル + サンプル画像2枚
 2. リプライでサンプル画像を2枚ずつ、全サンプル画像を貼り終えるまで続ける
@@ -62,7 +62,8 @@ pip install -r requirements.txt
 ## コマンド
 
 ```bash
-npm run generate        # FANZA APIから値引き中×人気の高い同人コミックを1件選び、GitHub Issueを作成
+npm run fetch-candidates # FANZA APIから値引き中×コミックの候補をバッチ取得し、黒塗り要否を解析してプールへ保存
+npm run generate        # 投稿候補プールから黒塗りがほとんど不要×人気の高い作品を1件選び、GitHub Issueを作成
 npm run handle-approval # GitHub Issueコメント(承認/却下)を処理(Actionsのissue_commentイベント経由で実行)
 npm run collect-metrics # 投稿済みツイートのエンゲージメントを取得
 npm run analyze-posting-times # エンゲージメント実績から時間帯ごとの投稿重みを算出
@@ -70,13 +71,26 @@ npm test                # ユニットテスト
 npm run typecheck
 ```
 
-## 投稿候補の選定ロジック
+## 投稿候補プールの構築(バッチ処理)
 
-`src/fanza/selectCandidate.ts`が、FANZA ItemList APIを`sort=rank`(人気順)でページングしながら舐め、以下をすべて満たす最初の1件を採用する。
+`src/pipeline/fetchCandidatePool.ts`が、FANZA ItemList APIを`sort=rank`(人気順)で`config/app.json`の`fanza.poolFetchPages`ページ分舐め、以下をすべて満たす作品を投稿候補プール(`fanza_candidates`テーブル、`content_id`単位でUPSERT)へ反映する。
 
 - 値引きキャンペーン中(`campaign[]`が存在する。実地調査の結果、`prices.price < prices.list_price`は「常時のセール価格設定」の作品まで拾ってしまうため使わない)
 - コミック作品である(`imageURL.large`のパスが`/digital/comic/`を含むかで判定。`iteminfo.genre[]`には「コミック」という汎用ジャンルタグがFANZA側に存在しないため、URLパスのメディア種別で判定している)
+
+続けて`src/pipeline/analyzeCandidatePool.ts`が、まだ黒塗り要否を判定していない(`redaction_status = 'pending'`)候補について、サンプル画像をダウンロードし後述のEraX-NSFWで検出、黒塗りに必要な面積率(`redaction_ratio`、サンプル画像群のうち最大値)を算出して保存する。1回のバッチ実行では`fanza.maxAnalysisPerRun`件までしか解析しない(YOLO推論はコストが高いため)。処理しきれなかった分はpendingのまま残り、次回の`fetch-candidates`実行に持ち越される。
+
+この2ステップは`npm run fetch-candidates`(`fetch-candidates.yml`)としてまとめて実行され、投稿タイミングから切り離して定期的に(cron-job.org経由で)動かす。
+
+## 投稿候補の選定ロジック(投稿タイミング)
+
+`src/fanza/selectCandidate.ts`が、投稿候補プール(`fanza_candidates`)から以下をすべて満たす作品を、`rank_order`(取得時点のランク順の目安、値が小さいほど人気)が良い順に1件選ぶ。**FANZA APIのライブ呼び出しはここでは行わない**。
+
+- 黒塗り要否の解析が完了している(`redaction_status = 'analyzed'`)
+- 黒塗りがほとんど不要と判定されている(`redaction_ratio <= config/app.jsonのfanza.maxRedactionRatio`、既定5%)
 - まだ候補にしたことがない(`posts`テーブルの`content_id`で、承認済み・投稿済みのものだけを除外対象にする。却下・投稿失敗した作品は限られたセール在庫の中で再候補になり得るため除外しない)
+
+サンプル画像URLがバッチ取得時から変わっていた場合(セールの入れ替わり等)、その候補の`redaction_status`は自動的に`pending`へ戻り、次回の`fetch-candidates`実行で再解析される。
 
 ## 画像スレッド投稿
 
@@ -84,18 +98,20 @@ npm run typecheck
 
 ## サンプル画像の検閲(黒塗り)
 
-サンプル画像の性的に露骨な描写部分は、投稿前に[EraX-NSFW-V1.0](https://huggingface.co/erax-ai/EraX-NSFW-V1.0)(YOLO11ベースの物体検出モデル、Apache 2.0)で自動検出し黒塗りする。
+サンプル画像の性的に露骨な描写部分は、投稿前に[EraX-NSFW-V1.0](https://huggingface.co/erax-ai/EraX-NSFW-V1.0)(YOLO11ベースの物体検出モデル、Apache 2.0)で自動検出し黒塗りする。同じ検出ロジックを、投稿候補プールの黒塗り要否判定(`redaction_ratio`算出)にも使い回している。
 
 - 検出はNode.js(`src/x/censorImage.ts`)からPythonスクリプト(`scripts/censor_image.py`)をサブプロセスとして呼び出す形で行う(NudeNet等の実写向けモデルは同人イラストにほぼ機能しないことを実地検証済みで、EraX-NSFWに切り替えている)
 - 検出対象クラス(5種類全部): `anus`, `make_love`, `nipple`, `penis`, `vagina`。`make_love`は性交描写全体を囲む広めのボックスで、画像の大部分〜全体が黒塗りされることがあるが、安全側に倒す判断で対象に含めている
 - confidence閾値は0.15(アニメ調イラストは実写より確信度が出にくいため低めに設定)
 - モデルファイル(`models/erax_nsfw_yolo11m.pt`、約40MB)は`.gitignore`対象で、`scripts/ensure_erax_model.py`が無ければHugging Faceから取得する。GitHub Actionsでは`actions/cache`でキャッシュし、実行のたびのダウンロードを避けている
-- 検閲に失敗した場合(Pythonプロセスの起動失敗・タイムアウト等)は例外として投稿処理全体が失敗する(`markPostFailed`、`post_failed`扱いになりIssueに通知される)。**検閲できなければ投稿しない**というフェイルセーフをこの仕組みで実現している
-- `config/app.json`の`censorSampleImages`(既定`true`)を`false`にすると検閲をスキップできる(検出モデル側で問題が起きた際の緊急停止用)
+- `src/x/censorImage.ts`は2つの関数を提供する。`censorImages`は実際に黒塗りした画像を返す(投稿確定時`finalizeApprovedPost`が使用)。`analyzeCensorship`は黒塗り済み画像を保存せず、検出box(パディング込み)の面積被覆率`redactionRatio`(0〜1、画像ごとのピクセル単位マスクの論理和で算出、box重複を二重カウントしない)だけを返す(投稿候補プールの事前解析`analyzeCandidatePool`が使用)。DBには画像バイナリを持たない設計のため、プール解析時に生成した黒塗り画像は使い捨てる
+- 検閲に失敗した場合(Pythonプロセスの起動失敗・タイムアウト等)、投稿確定時(`censorImages`)は例外として投稿処理全体が失敗する(`markPostFailed`、`post_failed`扱いになりIssueに通知される)。**検閲できなければ投稿しない**というフェイルセーフをこの仕組みで実現している。一方プール解析時(`analyzeCensorship`)の失敗は該当候補を`analysis_failed`にするだけで、バッチ全体は止めない(1作品の失敗が他候補の解析機会を奪わないため)
+- `config/app.json`の`censorSampleImages`(既定`true`)を`false`にすると投稿確定時の検閲をスキップできる(検出モデル側で問題が起きた際の緊急停止用)。プール解析(`redaction_ratio`算出)自体は`censorSampleImages`の影響を受けない(投稿候補の事前フィルタとして独立して動作する)
 
 ## GitHub Actions
 
-- `generate-posts.yml`: FANZAの値引き中×人気の高い同人コミックから投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断し、投稿可能時間帯(`postingWindow`、既定JST 7時〜翌2時)の外であればアプリ側(`isWithinPostingWindow`)でスキップする。`approvalMode: "auto"`の場合はその場で投稿(検閲含む)まで行うため、`approvalMode`が`"auto"`のときだけPythonセットアップ・検閲モデルのキャッシュ復元を行い、`"manual"`(既定)ではスキップしてActions実行時間を節約する。
+- `fetch-candidates.yml`: FANZAの値引き中×コミック作品をバッチ取得して投稿候補プール(`fanza_candidates`)へ反映し、続けて黒塗り要否(`redaction_ratio`)が未解析の候補を解析する(`npm run fetch-candidates`)。生成タイミングとは独立して定期実行する。
+- `generate-posts.yml`: 投稿候補プールから「黒塗りがほとんど不要」と判定済み×人気の高い同人コミックを選び、投稿候補の生成を試みる。実際に生成するかは`shouldGenerateNow`(1日の目標投稿数`targetPostsPerDay`・直近投稿からの間隔`minSpacingHours`・時間帯の重み)が判断し、投稿可能時間帯(`postingWindow`、既定JST 7時〜翌2時)の外であればアプリ側(`isWithinPostingWindow`)でスキップする。`approvalMode: "auto"`の場合はその場で投稿(検閲含む)まで行うため、`approvalMode`が`"auto"`のときだけPythonセットアップ・検閲モデルのキャッシュ復元を行い、`"manual"`(既定)ではスキップしてActions実行時間を節約する。
 - `handle-approval.yml`: Issueコメントに「承認」/「却下」と書かれたら処理(`pending-approval`ラベルが付いたIssueのみ反応)。承認時は画像検閲を伴うため、承認モードによらず毎回Pythonセットアップを行う。
 - `collect-metrics.yml`: 投稿済みツイートのエンゲージメントを取得し`post_metrics`に記録。
 - `analyze-posting-times.yml`: `post_metrics`を時間帯別に集計しClaudeに分析させ、`posting_time_weights`(反応の良い時間帯ほど高い重み)を更新する。データが少ない(投稿済み10件未満)うちは分析をスキップし、重みは既定の均等のまま。週1回なので数時間の遅延は無視でき、cron-job.org側の設定漏れ・失敗に備えてGitHub Actionsの`schedule`(毎週日曜JST 09:37)もフォールバックとして残している(他の2つは高頻度のため`schedule`の遅延問題を避けて`workflow_dispatch`のみ)。
@@ -110,6 +126,7 @@ cron-job.org側で以下のジョブを設定する(いずれもURLの`{owner}/{
 
 | ジョブ | 頻度 | URL |
 | --- | --- | --- |
+| Fetch Candidate Pool | 数時間おき(投稿候補プールの鮮度維持。値引きセールの入れ替わり頻度を踏まえた目安で、厳密な間隔は問わない) | `https://api.github.com/repos/{owner}/{repo}/actions/workflows/fetch-candidates.yml/dispatches` |
 | Generate Posts | 30分おき(24時間、時間帯判定はアプリ側で行うため常時叩いてよい) | `https://api.github.com/repos/{owner}/{repo}/actions/workflows/generate-posts.yml/dispatches` |
 | Collect Metrics | 毎日1回 | `https://api.github.com/repos/{owner}/{repo}/actions/workflows/collect-metrics.yml/dispatches` |
 | Analyze Posting Times | 週1回 | `https://api.github.com/repos/{owner}/{repo}/actions/workflows/analyze-posting-times.yml/dispatches` |

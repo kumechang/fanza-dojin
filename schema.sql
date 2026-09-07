@@ -69,3 +69,31 @@ CREATE TABLE IF NOT EXISTS posting_time_weights (
   reason TEXT,              -- Claudeが重みをそう判断した理由(監査用)
   updated_at TEXT
 );
+
+-- fetch-candidatesバッチが定期的にFANZA ItemList APIから取得する投稿候補プール。
+-- 「コミック × 値引き中」の作品をcontent_id単位でUPSERTし、各作品のサンプル画像群について
+-- どれくらい黒塗りが必要か(redaction_ratio)を非同期に判定しておく。投稿タイミング
+-- (generateCandidate)ではこのテーブルを参照するだけで、FANZA APIのライブ呼び出しは行わない。
+CREATE TABLE IF NOT EXISTS fanza_candidates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  content_id TEXT NOT NULL UNIQUE, -- postsと異なりプールは1作品1行のみ保持する(セール中は繰り返し観測されるため)
+  title TEXT NOT NULL,
+  affiliate_url TEXT NOT NULL,
+  sample_image_urls TEXT NOT NULL, -- JSON配列。この内容が変わった場合はredaction_statusをpendingへ戻す
+  price INTEGER,
+  list_price INTEGER,
+  campaign_title TEXT,
+  genre_names TEXT,
+  review_count INTEGER,
+  review_average REAL,
+  rank_order INTEGER, -- sort=rank走査時の掲載順(値が小さいほど人気)。選定時の並び順に使う
+
+  redaction_status TEXT NOT NULL DEFAULT 'pending', -- pending | analyzed | analysis_failed
+  redaction_ratio REAL,   -- サンプル画像群のうち最大の黒塗り面積率(0〜1)。analyzed時のみ設定
+  redaction_detail TEXT,  -- 画像ごとの検出詳細のJSON(監査用)
+  analyzed_at TEXT,
+
+  fetched_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fanza_candidates_selection ON fanza_candidates(redaction_status, redaction_ratio, rank_order);

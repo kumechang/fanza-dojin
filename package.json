@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "fetch-candidates": "tsx src/cli/fetchCandidatePool.ts",
     "generate": "tsx src/cli/generate.ts",
     "handle-approval": "tsx src/cli/handleApproval.ts",
     "collect-metrics": "tsx src/cli/collectMetrics.ts",
