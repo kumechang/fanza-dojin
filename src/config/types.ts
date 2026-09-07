@@ -24,7 +24,14 @@ export interface AppConfig {
     service: string; // "doujin"
     floor: string;   // "digital_doujin"
     hits: number;    // 1リクエストあたりの取得件数(最大100)
-    maxPages: number; // sort=rank順に何ページまで舐めて値引き中の候補を探すか
     imagesPerTweet: number; // 1ツイートに添付するサンプル画像枚数
+    // fetch-candidatesバッチが投稿候補プールを更新する際、sort=rank順に何ページ舐めるか。
+    poolFetchPages: number;
+    // 1回のfetch-candidatesバッチ実行で黒塗り要否解析(YOLO推論)を行う候補数の上限。
+    // 推論コストが高いため、処理しきれない分はpendingのまま次回実行に持ち越す。
+    maxAnalysisPerRun: number;
+    // 投稿候補プールの中から「黒塗りがほとんど不要」とみなして投稿対象にする、
+    // サンプル画像の黒塗り面積率(redaction_ratio)の許容上限(0〜1)。
+    maxRedactionRatio: number;
   };
 }

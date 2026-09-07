@@ -3,10 +3,9 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { describe, it, expect, beforeEach } from "vitest";
 import { selectFanzaCandidate } from "../src/fanza/selectCandidate.js";
+import { upsertCandidate, markAnalyzed } from "../src/db/repositories/fanzaCandidatesRepo.js";
 import { createPost } from "../src/db/repositories/postsRepo.js";
 import type { AppConfig } from "../src/config/types.js";
-import type { FanzaItem } from "../src/fanza/types.js";
-import type { FetchItemListResult } from "../src/fanza/client.js";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
@@ -35,15 +34,43 @@ function markUsed(db: Database.Database, accountName: string, contentId: string)
   db.prepare(`UPDATE posts SET status = 'posted' WHERE id = ?`).run(id);
 }
 
-function comicItem(contentId: string, overrides: Partial<FanzaItem> = {}): FanzaItem {
-  return {
+// プールに1件追加し、指定のredaction_ratioで解析済みにする(analyzed=デフォルト)。
+function addAnalyzedCandidate(
+  db: Database.Database,
+  contentId: string,
+  overrides: { rankOrder?: number; redactionRatio?: number } = {}
+): void {
+  upsertCandidate(db, {
     content_id: contentId,
     title: `作品${contentId}`,
-    affiliateURL: "https://example.com",
-    imageURL: { large: `https://doujin-assets.dmm.co.jp/digital/comic/${contentId}/${contentId}pl.jpg` },
-    campaign: [{ title: "30%OFF" }],
-    ...overrides,
-  };
+    affiliate_url: "https://example.com",
+    sample_image_urls: [`https://example.com/${contentId}.jpg`],
+    price: 100,
+    list_price: 300,
+    campaign_title: "30%OFF",
+    genre_names: [],
+    review_count: null,
+    review_average: null,
+    rank_order: overrides.rankOrder ?? 1,
+  });
+  const row = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = ?`).get(contentId) as { id: number };
+  markAnalyzed(db, row.id, overrides.redactionRatio ?? 0, []);
+}
+
+function addPendingCandidate(db: Database.Database, contentId: string): void {
+  upsertCandidate(db, {
+    content_id: contentId,
+    title: `作品${contentId}`,
+    affiliate_url: "https://example.com",
+    sample_image_urls: [`https://example.com/${contentId}.jpg`],
+    price: 100,
+    list_price: 300,
+    campaign_title: "30%OFF",
+    genre_names: [],
+    review_count: null,
+    review_average: null,
+    rank_order: 1,
+  });
 }
 
 function baseConfig(): AppConfig {
@@ -61,8 +88,10 @@ function baseConfig(): AppConfig {
       service: "doujin",
       floor: "digital_doujin",
       hits: 100,
-      maxPages: 3,
       imagesPerTweet: 2,
+      poolFetchPages: 5,
+      maxAnalysisPerRun: 20,
+      maxRedactionRatio: 0.05,
     },
   };
 }
@@ -74,77 +103,56 @@ describe("selectFanzaCandidate", () => {
     db = createTestDb();
   });
 
-  it("picks the first item that is discounted, comic-genre, and unused", async () => {
-    const fetchFn = async (): Promise<FetchItemListResult> => ({
-      items: [comicItem("a1"), comicItem("a2")],
-      totalCount: 2,
-    });
+  it("picks an analyzed, low-redaction, unused candidate from the pool", () => {
+    addAnalyzedCandidate(db, "a1", { redactionRatio: 0.02 });
 
-    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
-    expect(result?.item.content_id).toBe("a1");
+    const result = selectFanzaCandidate(db, baseConfig(), "account1");
+    expect(result?.contentId).toBe("a1");
   });
 
-  it("skips items that have already been used (approved/posted)", async () => {
+  it("returns null when the pool is empty", () => {
+    const result = selectFanzaCandidate(db, baseConfig(), "account1");
+    expect(result).toBeNull();
+  });
+
+  it("skips candidates that are still pending analysis", () => {
+    addPendingCandidate(db, "a1");
+    addAnalyzedCandidate(db, "a2", { redactionRatio: 0.02 });
+
+    const result = selectFanzaCandidate(db, baseConfig(), "account1");
+    expect(result?.contentId).toBe("a2");
+  });
+
+  it("skips candidates whose redaction_ratio exceeds maxRedactionRatio", () => {
+    addAnalyzedCandidate(db, "a1", { redactionRatio: 0.5 });
+    addAnalyzedCandidate(db, "a2", { redactionRatio: 0.01, rankOrder: 2 });
+
+    const result = selectFanzaCandidate(db, baseConfig(), "account1");
+    expect(result?.contentId).toBe("a2");
+  });
+
+  it("skips candidates that have already been used (approved/posted) by this account", () => {
     markUsed(db, "account1", "a1");
-    const fetchFn = async (): Promise<FetchItemListResult> => ({
-      items: [comicItem("a1"), comicItem("a2")],
-      totalCount: 2,
-    });
+    addAnalyzedCandidate(db, "a1", { redactionRatio: 0.01 });
+    addAnalyzedCandidate(db, "a2", { redactionRatio: 0.01, rankOrder: 2 });
 
-    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
-    expect(result?.item.content_id).toBe("a2");
+    const result = selectFanzaCandidate(db, baseConfig(), "account1");
+    expect(result?.contentId).toBe("a2");
   });
 
-  it("does not exclude a content_id used by a different account", async () => {
+  it("does not exclude a content_id used by a different account", () => {
     markUsed(db, "account2", "a1");
-    const fetchFn = async (): Promise<FetchItemListResult> => ({
-      items: [comicItem("a1"), comicItem("a2")],
-      totalCount: 2,
-    });
+    addAnalyzedCandidate(db, "a1", { redactionRatio: 0.01 });
 
-    // 重複防止はアカウント単位のみ。account2が使用済みでもaccount1からは選べる(要件通り)。
-    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
-    expect(result?.item.content_id).toBe("a1");
+    const result = selectFanzaCandidate(db, baseConfig(), "account1");
+    expect(result?.contentId).toBe("a1");
   });
 
-  it("skips non-comic items (imageURL path not under /digital/comic/)", async () => {
-    const fetchFn = async (): Promise<FetchItemListResult> => ({
-      items: [
-        comicItem("a1", { imageURL: { large: "https://doujin-assets.dmm.co.jp/digital/voice/a1/a1pl.jpg" } }),
-        comicItem("a2"),
-      ],
-      totalCount: 2,
-    });
+  it("prefers the better-ranked candidate among eligible ones", () => {
+    addAnalyzedCandidate(db, "a1", { redactionRatio: 0.01, rankOrder: 50 });
+    addAnalyzedCandidate(db, "a2", { redactionRatio: 0.01, rankOrder: 5 });
 
-    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
-    expect(result?.item.content_id).toBe("a2");
-  });
-
-  it("skips items that are not discounted (no campaign)", async () => {
-    const fetchFn = async (): Promise<FetchItemListResult> => ({
-      items: [comicItem("a1", { campaign: undefined, prices: { price: "100", list_price: "300" } }), comicItem("a2")],
-      totalCount: 2,
-    });
-
-    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
-    expect(result?.item.content_id).toBe("a2");
-  });
-
-  it("pages through offsets and returns null after exhausting maxPages", async () => {
-    const offsetsSeen: number[] = [];
-    const fetchFn = async (params: { offset: number }): Promise<FetchItemListResult> => {
-      offsetsSeen.push(params.offset);
-      return { items: [comicItem(`unused-but-not-eligible-${params.offset}`, { campaign: undefined })], totalCount: 1 };
-    };
-
-    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
-    expect(result).toBeNull();
-    expect(offsetsSeen).toEqual([1, 101, 201]);
-  });
-
-  it("stops early when a page returns no items", async () => {
-    const fetchFn = async (): Promise<FetchItemListResult> => ({ items: [], totalCount: 0 });
-    const result = await selectFanzaCandidate(db, baseConfig(), "account1", fetchFn);
-    expect(result).toBeNull();
+    const result = selectFanzaCandidate(db, baseConfig(), "account1");
+    expect(result?.contentId).toBe("a2");
   });
 });

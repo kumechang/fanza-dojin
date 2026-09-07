@@ -15,7 +15,9 @@
     "service": "doujin",
     "floor": "digital_doujin",
     "hits": 100,
-    "maxPages": 3,
-    "imagesPerTweet": 2
+    "imagesPerTweet": 2,
+    "poolFetchPages": 5,
+    "maxAnalysisPerRun": 20,
+    "maxRedactionRatio": 0.05
   }
 }
