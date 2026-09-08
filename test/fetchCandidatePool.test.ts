@@ -43,7 +43,8 @@ function baseConfig(): AppConfig {
       imagesPerTweet: 2,
       poolFetchPages: 3,
       maxAnalysisPerRun: 20,
-      maxRedactionRatio: 0.05,
+      maxPageRedactionRatio: 0.3,
+      maxUnpostablePageRatio: 0.5,
     },
   };
 }

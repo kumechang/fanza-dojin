@@ -7,7 +7,7 @@ import {
   getPendingCandidates,
   markAnalyzed,
   markAnalysisFailed,
-  selectBestCandidate,
+  getAnalyzedCandidatesOrderedByRank,
 } from "../src/db/repositories/fanzaCandidatesRepo.js";
 
 function createTestDb(): Database.Database {
@@ -88,36 +88,25 @@ describe("fanzaCandidatesRepo", () => {
     expect(getPendingCandidates(db, 10)).toHaveLength(2);
   });
 
-  it("markAnalysisFailed leaves the candidate out of selection permanently", () => {
+  it("markAnalysisFailed leaves the candidate out of getAnalyzedCandidatesOrderedByRank", () => {
     upsertCandidate(db, baseInput());
     const row = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = 'a1'`).get() as { id: number };
     markAnalysisFailed(db, row.id);
 
-    const selected = selectBestCandidate(db, new Set(), 1);
-    expect(selected).toBeUndefined();
+    expect(getAnalyzedCandidatesOrderedByRank(db)).toHaveLength(0);
   });
 
-  it("selectBestCandidate orders by rank_order then redaction_ratio", () => {
+  it("getAnalyzedCandidatesOrderedByRank orders by rank_order and excludes pending/failed rows", () => {
     upsertCandidate(db, baseInput({ content_id: "a1", rank_order: 10 }));
     upsertCandidate(db, baseInput({ content_id: "a2", rank_order: 5 }));
+    upsertCandidate(db, baseInput({ content_id: "a3", rank_order: 1 }));
     const a1 = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = 'a1'`).get() as { id: number };
     const a2 = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = 'a2'`).get() as { id: number };
     markAnalyzed(db, a1.id, 0.01, []);
     markAnalyzed(db, a2.id, 0.01, []);
+    // a3はpendingのまま(未解析)
 
-    const selected = selectBestCandidate(db, new Set(), 1);
-    expect(selected?.content_id).toBe("a2");
-  });
-
-  it("selectBestCandidate excludes used content_ids and above-threshold ratios", () => {
-    upsertCandidate(db, baseInput({ content_id: "a1", rank_order: 1 }));
-    upsertCandidate(db, baseInput({ content_id: "a2", rank_order: 2 }));
-    const a1 = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = 'a1'`).get() as { id: number };
-    const a2 = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = 'a2'`).get() as { id: number };
-    markAnalyzed(db, a1.id, 0.5, []);
-    markAnalyzed(db, a2.id, 0.01, []);
-
-    expect(selectBestCandidate(db, new Set(), 0.05)?.content_id).toBe("a2");
-    expect(selectBestCandidate(db, new Set(["a2"]), 0.05)).toBeUndefined();
+    const rows = getAnalyzedCandidatesOrderedByRank(db);
+    expect(rows.map((r) => r.content_id)).toEqual(["a2", "a1"]);
   });
 });

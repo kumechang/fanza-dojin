@@ -89,11 +89,12 @@ CREATE TABLE IF NOT EXISTS fanza_candidates (
   rank_order INTEGER, -- sort=rank走査時の掲載順(値が小さいほど人気)。選定時の並び順に使う
 
   redaction_status TEXT NOT NULL DEFAULT 'pending', -- pending | analyzed | analysis_failed
-  redaction_ratio REAL,   -- サンプル画像群のうち最大の黒塗り面積率(0〜1)。analyzed時のみ設定
-  redaction_detail TEXT,  -- 画像ごとの検出詳細のJSON(監査用)
+  redaction_ratio REAL,   -- サンプル画像群のうち最大の黒塗り面積率(0〜1、監査・一覧表示用)。analyzed時のみ設定
+  redaction_detail TEXT,  -- 画像ごとの検出詳細・黒塗り面積率のJSON配列(sample_image_urlsと同順)。
+                          -- 投稿可否の判定(ページ単位の間引き・作品ごと除外)はこれを使う
   analyzed_at TEXT,
 
   fetched_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
   updated_at TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_fanza_candidates_selection ON fanza_candidates(redaction_status, redaction_ratio, rank_order);
+CREATE INDEX IF NOT EXISTS idx_fanza_candidates_selection ON fanza_candidates(redaction_status, rank_order);

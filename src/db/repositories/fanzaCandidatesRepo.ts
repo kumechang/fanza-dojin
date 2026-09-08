@@ -98,6 +98,8 @@ export function getPendingCandidates(db: Database.Database, limit: number): Fanz
     .all(limit) as FanzaCandidateRow[];
 }
 
+// redactionRatioはサンプル画像群のうち最大の黒塗り面積率(監査・一覧表示用)。
+// 投稿可否の判定自体はdetail(画像ごとのredactionRatio)を見るfanza/redactionPolicy.tsが行う。
 export function markAnalyzed(db: Database.Database, id: number, redactionRatio: number, detail: unknown): void {
   db.prepare(
     `UPDATE fanza_candidates
@@ -114,20 +116,12 @@ export function markAnalysisFailed(db: Database.Database, id: number): void {
   ).run(id);
 }
 
-// generateCandidate用: 「黒塗りがほとんど不要(redaction_ratio <= maxRedactionRatio)」と
-// 判定済みの候補の中から、このアカウントがまだ候補にしていない(usedContentIdsに無い)、
-// 最もランクの良い(rank_orderが小さい)ものを1件選ぶ。
-export function selectBestCandidate(
-  db: Database.Database,
-  usedContentIds: Set<string>,
-  maxRedactionRatio: number
-): FanzaCandidateRow | undefined {
-  const rows = db
-    .prepare(
-      `SELECT * FROM fanza_candidates
-       WHERE redaction_status = 'analyzed' AND redaction_ratio <= ?
-       ORDER BY rank_order ASC, redaction_ratio ASC`
-    )
-    .all(maxRedactionRatio) as FanzaCandidateRow[];
-  return rows.find((row) => !usedContentIds.has(row.content_id));
+// selectFanzaCandidate用: 黒塗り要否の解析が完了した候補を、ランクの良い(rank_orderが小さい)順に
+// 全件返す。「黒塗りがほとんど不要か」の判定(ページ単位の間引き・作品ごと除外)はページごとの
+// redaction_detailを見る必要があり、かつ閾値を選定のたびに(再解析なしで)反映したいため、
+// SQL側では絞り込まずfanza/redactionPolicy.tsを使う呼び出し側(selectCandidate.ts)に委ねる。
+export function getAnalyzedCandidatesOrderedByRank(db: Database.Database): FanzaCandidateRow[] {
+  return db
+    .prepare(`SELECT * FROM fanza_candidates WHERE redaction_status = 'analyzed' ORDER BY rank_order ASC`)
+    .all() as FanzaCandidateRow[];
 }

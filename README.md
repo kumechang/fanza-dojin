@@ -78,7 +78,7 @@ npm run typecheck
 - 値引きキャンペーン中(`campaign[]`が存在する。実地調査の結果、`prices.price < prices.list_price`は「常時のセール価格設定」の作品まで拾ってしまうため使わない)
 - コミック作品である(`imageURL.large`のパスが`/digital/comic/`を含むかで判定。`iteminfo.genre[]`には「コミック」という汎用ジャンルタグがFANZA側に存在しないため、URLパスのメディア種別で判定している)
 
-続けて`src/pipeline/analyzeCandidatePool.ts`が、まだ黒塗り要否を判定していない(`redaction_status = 'pending'`)候補について、サンプル画像をダウンロードし後述のEraX-NSFWで検出、黒塗りに必要な面積率(`redaction_ratio`、サンプル画像群のうち最大値)を算出して保存する。1回のバッチ実行では`fanza.maxAnalysisPerRun`件までしか解析しない(YOLO推論はコストが高いため)。処理しきれなかった分はpendingのまま残り、次回の`fetch-candidates`実行に持ち越される。
+続けて`src/pipeline/analyzeCandidatePool.ts`が、まだ黒塗り要否を判定していない(`redaction_status = 'pending'`)候補について、サンプル画像をダウンロードし後述のEraX-NSFWで検出、**サンプル画像1枚(1ページ)ごとの黒塗り面積率**を算出して`redaction_detail`(JSON配列、`sample_image_urls`と同順)へ保存する(`redaction_ratio`列にはこのうち最大値を監査・一覧表示用に保持する)。1回のバッチ実行では`fanza.maxAnalysisPerRun`件までしか解析しない(YOLO推論はコストが高いため)。処理しきれなかった分はpendingのまま残り、次回の`fetch-candidates`実行に持ち越される。
 
 この2ステップは`npm run fetch-candidates`(`fetch-candidates.yml`)としてまとめて実行され、投稿タイミングから切り離して定期的に(cron-job.org経由で)動かす。
 
@@ -87,10 +87,21 @@ npm run typecheck
 `src/fanza/selectCandidate.ts`が、投稿候補プール(`fanza_candidates`)から以下をすべて満たす作品を、`rank_order`(取得時点のランク順の目安、値が小さいほど人気)が良い順に1件選ぶ。**FANZA APIのライブ呼び出しはここでは行わない**。
 
 - 黒塗り要否の解析が完了している(`redaction_status = 'analyzed'`)
-- 黒塗りがほとんど不要と判定されている(`redaction_ratio <= config/app.jsonのfanza.maxRedactionRatio`、既定5%)
 - まだ候補にしたことがない(`posts`テーブルの`content_id`で、承認済み・投稿済みのものだけを除外対象にする。却下・投稿失敗した作品は限られたセール在庫の中で再候補になり得るため除外しない)
+- 投稿可能と判定されている(`src/fanza/redactionPolicy.ts`、詳細は次項)
 
 サンプル画像URLがバッチ取得時から変わっていた場合(セールの入れ替わり等)、その候補の`redaction_status`は自動的に`pending`へ戻り、次回の`fetch-candidates`実行で再解析される。
+
+### ページ単位の黒塗り判定(redactionPolicy)
+
+作品全体を1つの黒塗り率で足切りするのではなく、**ページ(サンプル画像)単位**で投稿可否を判定し、問題のあるページだけをスレッドから間引く。
+
+- サンプル画像1枚あたりの黒塗り面積率が`fanza.maxPageRedactionRatio`(既定30%)を超えるページは「投稿不可ページ」として、そのページだけを間引く(`selectPostablePageIndices`)
+- 投稿不可ページの割合が`fanza.maxUnpostablePageRatio`(既定50%)を超える作品は、間引くとスレッドとして成立しない・元のサンプルの魅力を大きく損なうため、個別ページを間引くのではなく**作品自体**を投稿候補から除外する(`isWorkPostable`)
+
+実際のプールデータで検証したところ、ページごとの黒塗り率はほぼ0%の安全なページと、ページ全体が黒塗りされる露骨なページとに二極化しており、20〜40%あたりは該当ページがほとんど無い「谷間」だった。`maxPageRedactionRatio`の既定値(30%)はこの谷間に置いている。
+
+これらの閾値の判定は選定のたび(`generate-posts`実行ごと)に行い、バッチ解析時には確定させない。ページごとの黒塗り面積率は`fanza_candidates.redaction_detail`に保存済みのため、閾値を変更しても高コストなYOLO再解析なしにすぐ反映される。
 
 ## 画像スレッド投稿
 

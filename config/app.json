@@ -18,6 +18,7 @@
     "imagesPerTweet": 2,
     "poolFetchPages": 5,
     "maxAnalysisPerRun": 20,
-    "maxRedactionRatio": 0.05
+    "maxPageRedactionRatio": 0.3,
+    "maxUnpostablePageRatio": 0.5
   }
 }
