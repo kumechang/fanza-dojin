@@ -113,7 +113,7 @@ npm run typecheck
 
 - 検出はNode.js(`src/x/censorImage.ts`)からPythonスクリプト(`scripts/censor_image.py`)をサブプロセスとして呼び出す形で行う(NudeNet等の実写向けモデルは同人イラストにほぼ機能しないことを実地検証済みで、EraX-NSFWに切り替えている)
 - 検出対象クラス(5種類全部): `anus`, `make_love`, `nipple`, `penis`, `vagina`。`make_love`は性交描写全体を囲む広めのボックスで、画像の大部分〜全体が黒塗りされることがあるが、安全側に倒す判断で対象に含めている
-- confidence閾値は0.15(アニメ調イラストは実写より確信度が出にくいため低めに設定)
+- confidence閾値は0.10(アニメ調イラストは実写より確信度が出にくいため低めに設定。実運用で検出漏れが確認されたため0.15から引き下げた)
 - モデルファイル(`models/erax_nsfw_yolo11m.pt`、約40MB)は`.gitignore`対象で、`scripts/ensure_erax_model.py`が無ければHugging Faceから取得する。GitHub Actionsでは`actions/cache`でキャッシュし、実行のたびのダウンロードを避けている
 - `src/x/censorImage.ts`は2つの関数を提供する。`censorImages`は実際に黒塗りした画像を返す(投稿確定時`finalizeApprovedPost`が使用)。`analyzeCensorship`は黒塗り済み画像を保存せず、検出box(パディング込み)の面積被覆率`redactionRatio`(0〜1、画像ごとのピクセル単位マスクの論理和で算出、box重複を二重カウントしない)だけを返す(投稿候補プールの事前解析`analyzeCandidatePool`が使用)。DBには画像バイナリを持たない設計のため、プール解析時に生成した黒塗り画像は使い捨てる
 - 検閲に失敗した場合(Pythonプロセスの起動失敗・タイムアウト等)、投稿確定時(`censorImages`)は例外として投稿処理全体が失敗する(`markPostFailed`、`post_failed`扱いになりIssueに通知される)。**検閲できなければ投稿しない**というフェイルセーフをこの仕組みで実現している。一方プール解析時(`analyzeCensorship`)の失敗は該当候補を`analysis_failed`にするだけで、バッチ全体は止めない(1作品の失敗が他候補の解析機会を奪わないため)

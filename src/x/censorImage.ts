@@ -16,9 +16,12 @@ const PYTHON_BIN = process.env.CENSOR_PYTHON_BIN ?? "python3";
 const TIMEOUT_MS = Number(process.env.CENSOR_TIMEOUT_MS ?? 60_000);
 
 // 実地検証(EraX-NSFW-V1.0, mediumモデル)で妥当と確認済みの値。
-// confidenceを低め(0.15)にしているのは、アニメ調イラストは実写より確信度が
+// confidenceを低め(0.10)にしているのは、アニメ調イラストは実写より確信度が
 // 出にくく、閾値を高くすると検出漏れ(=黒塗りされずに投稿される)が増えるため。
-const CONF_THRESHOLD = 0.15;
+// 実運用で「本来黒塗りすべき箇所が検出されず投稿された」事例が確認されたため、
+// 0.15から0.10へさらに引き下げた(誤検出=過剰な黒塗りが増えるトレードオフはあるが、
+// 「検閲できなければ投稿しない」設計上、見逃しより過剰検出の方が安全側)。
+const CONF_THRESHOLD = 0.1;
 const IOU_THRESHOLD = 0.3;
 
 // 「露出度の高い部位全般」として黒塗り対象にするEraX-NSFW検出クラス(5種類全部)。
