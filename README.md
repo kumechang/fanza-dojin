@@ -59,6 +59,16 @@ pip install -r requirements.txt
 
 `npm run generate`は`X_ACCOUNTS_JSON`に登録された全アカウント分を順番に処理する(投稿頻度・重複防止の判定はアカウントごとに独立)。1アカウントの失敗が他アカウントの処理を止めることはない。
 
+### アカウントの一時停止
+
+特定のアカウントを一時的に投稿対象から外したい場合、`X_ACCOUNTS_JSON`からエントリを削除する(認証情報ごと失われ、復元にはOAuth認可をやり直す手間がかかる)のではなく、`config/app.json`の`pausedAccountNames`にアカウント名を追加する。
+
+```json
+"pausedAccountNames": ["account1"]
+```
+
+これにより`npm run generate`(`generate-posts.yml`)がそのアカウント分をスキップするようになる(新規の投稿候補生成・投稿のみ止まる)。既存の投稿履歴(`posts`/`post_metrics`)には影響せず、`collect-metrics`等の集計は引き続き行われる。再開する場合は配列から名前を外すだけでよい。
+
 ## コマンド
 
 ```bash

@@ -35,6 +35,7 @@ function baseConfig(): AppConfig {
     targetPostsPerDay: 4,
     minSpacingHours: 2,
     censorSampleImages: true,
+    pausedAccountNames: [],
     fanza: {
       site: "FANZA",
       service: "doujin",

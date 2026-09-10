@@ -25,6 +25,7 @@ function baseConfig(overrides: Partial<AppConfig["fanza"]> = {}): AppConfig {
     targetPostsPerDay: 4,
     minSpacingHours: 2,
     censorSampleImages: true,
+    pausedAccountNames: [],
     fanza: {
       site: "FANZA",
       service: "doujin",

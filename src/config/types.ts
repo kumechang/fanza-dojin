@@ -18,6 +18,11 @@ export interface AppConfig {
   // サンプル画像の性的な描写部分をEraX-NSFW(YOLO11)で検出し黒塗りするかどうか。
   // false時は検閲をスキップしてそのまま投稿する(検出モデル側の不具合等に備えた緊急停止用)。
   censorSampleImages: boolean;
+  // 一時的に新規投稿候補の生成・投稿を止めたいXアカウント名(X_ACCOUNTS_JSONのname)の一覧。
+  // X_ACCOUNTS_JSON自体からエントリを削除すると認証情報ごと失われ復元が手間になるため、
+  // ここに名前を追加するだけで一時停止でき、外せばすぐ再開できるようにしている。
+  // 既存の投稿履歴(posts/post_metrics)には影響しない(collect-metrics等は対象外)。
+  pausedAccountNames: string[];
   // FANZA ItemList APIから同人コミックの値引き候補を探すための設定。
   fanza: {
     site: string;   // "FANZA"

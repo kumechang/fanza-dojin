@@ -83,6 +83,16 @@ export function findXAccount(accountName: string): XAccountCredentials | undefin
   return listXAccounts().find((account) => account.name === accountName);
 }
 
+// config/app.jsonのpausedAccountNamesに含まれるアカウントを除外する。X_ACCOUNTS_JSON自体からは
+// 削除しない(認証情報を残したまま新規投稿候補の生成だけを一時的に止めたいケース向け)。
+export function filterActiveAccounts(
+  accounts: XAccountCredentials[],
+  pausedAccountNames: string[]
+): XAccountCredentials[] {
+  const paused = new Set(pausedAccountNames);
+  return accounts.filter((account) => !paused.has(account.name));
+}
+
 export function hasXCredentials(accountName: string): boolean {
   return env.x.apiKey.length > 0 && env.x.apiSecret.length > 0 && findXAccount(accountName) !== undefined;
 }
