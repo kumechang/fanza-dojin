@@ -10,6 +10,7 @@
   "targetPostsPerDay": 4,
   "minSpacingHours": 2,
   "censorSampleImages": true,
+  "pausedAccountNames": ["fk4eqg"],
   "fanza": {
     "site": "FANZA",
     "service": "doujin",

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { filterActiveAccounts } from "../src/lib/env.js";
 
 // listXAccounts()はモジュール内でメモ化するため、環境変数を切り替えてテストするには
 // 毎回モジュールキャッシュをリセットして再importする必要がある。
@@ -84,5 +85,24 @@ describe("hasXCredentials", () => {
     process.env.X_ACCOUNTS_JSON = JSON.stringify([{ name: "a", accessToken: "t", accessSecret: "s" }]);
     const { hasXCredentials } = await import("../src/lib/env.js");
     expect(hasXCredentials("a")).toBe(true);
+  });
+});
+
+describe("filterActiveAccounts", () => {
+  const accounts = [
+    { name: "a", accessToken: "t1", accessSecret: "s1" },
+    { name: "b", accessToken: "t2", accessSecret: "s2" },
+  ];
+
+  it("excludes accounts listed in pausedAccountNames", () => {
+    expect(filterActiveAccounts(accounts, ["a"])).toEqual([accounts[1]]);
+  });
+
+  it("returns all accounts when pausedAccountNames is empty", () => {
+    expect(filterActiveAccounts(accounts, [])).toEqual(accounts);
+  });
+
+  it("ignores paused names that don't match any account", () => {
+    expect(filterActiveAccounts(accounts, ["unknown"])).toEqual(accounts);
   });
 });
