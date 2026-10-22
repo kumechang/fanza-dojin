@@ -103,15 +103,22 @@ export function getPostByIssueNumber(db: Database.Database, issueNumber: number)
 }
 
 // selectFanzaCandidate用: 指定アカウントが既に候補にしたことがある(=もう一度紹介する必要がない)
-// content_idの集合。却下・投稿失敗は限られたセール在庫の中で再候補になり得るため除外対象に含めない
-// (承認済み・投稿済みのものだけを「もう紹介した」とみなす)。他アカウントとの重複はチェックしない
+// content_idの集合。既定では承認済み・投稿済みのものだけを「もう紹介した」とみなし、却下・投稿失敗は
+// 限られたセール在庫の中で再候補になり得るため除外しない。他アカウントとの重複はチェックしない
 // (アカウント間で同じ作品が被ることは許容する)。
-export function getUsedContentIds(db: Database.Database, accountName: string): Set<string> {
+// Telegram承認モードでは、確認待ち・却下済み・投稿失敗の作品も追加で除外する(extraStatuses)。
+// 人が黒塗り結果を見て判断するため、確認待ちのまま同じ作品のプレビューが重複して届いたり、
+// 却下した作品がランク順の先頭として毎回再提示されたりするのを防ぐ。
+export function getUsedContentIds(
+  db: Database.Database,
+  accountName: string,
+  extraStatuses: PostStatus[] = []
+): Set<string> {
+  const statuses = ["approved", "posted", "posted_dryrun", ...extraStatuses];
+  const placeholders = statuses.map(() => "?").join(", ");
   const rows = db
-    .prepare(
-      `SELECT DISTINCT content_id FROM posts WHERE account_name = ? AND status IN ('approved', 'posted', 'posted_dryrun')`
-    )
-    .all(accountName) as { content_id: string }[];
+    .prepare(`SELECT DISTINCT content_id FROM posts WHERE account_name = ? AND status IN (${placeholders})`)
+    .all(accountName, ...statuses) as { content_id: string }[];
   return new Set(rows.map((row) => row.content_id));
 }
 

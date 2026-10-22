@@ -2,7 +2,8 @@
 # 30分おきに起動して投稿候補プール(fetch-candidates.ymlが定期更新するfanza_candidates)
 # から、ページ単位の黒塗り判定(src/fanza/redactionPolicy.ts)で投稿可能と判定された
 # 値引き中×人気の高い同人コミックを1件選び、投稿候補を生成する
-# (approvalMode: autoの場合はその場で投稿まで行う)。
+# (approvalMode: autoの場合はその場で投稿まで行い、telegramの場合は黒塗り済み画像を
+# Telegramへ送って確認を求める。承認後の投稿はhandle-telegram.ymlが行う)。
 # FANZA APIのライブ呼び出しはここでは行わない(プールを参照するのみ)。
 #
 # 実際に生成するかどうかはshouldGenerateNow(src/pipeline/shouldGenerateNow.ts)が
@@ -42,37 +43,38 @@ jobs:
 
       - run: npm ci
 
-      # approvalMode: "auto"のときだけ、この実行の中でXへの画像投稿(検閲処理を含む)まで
-      # 行われる。generate-postsはcron-job.orgから1日約48回起動されるため、manualモード
-      # (現在の既定)では毎回Pythonセットアップすると無駄なActions分数を消費する。autoのときだけセットアップする。
+      # approvalMode: "auto"(即時投稿)と"telegram"(黒塗り済み画像の確認依頼の送信)のときだけ、
+      # この実行の中で画像の検閲処理が走る。generate-postsはcron-job.orgから1日約48回起動される
+      # ため、manualモードでは毎回Pythonセットアップすると無駄なActions分数を消費する。
+      # manual以外のときだけセットアップする。
       - id: check-mode
         run: echo "mode=$(jq -r .approvalMode config/app.json)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v5
-        if: steps.check-mode.outputs.mode == 'auto'
+        if: steps.check-mode.outputs.mode != 'manual'
         with:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: requirements.txt
 
       - name: Install censorship dependencies
-        if: steps.check-mode.outputs.mode == 'auto'
+        if: steps.check-mode.outputs.mode != 'manual'
         run: pip install -r requirements.txt
 
       - name: Cache EraX-NSFW model
         id: cache-model
-        if: steps.check-mode.outputs.mode == 'auto'
+        if: steps.check-mode.outputs.mode != 'manual'
         uses: actions/cache@v4
         with:
           path: models/erax_nsfw_yolo11m.pt
           key: erax-nsfw-model-v1-medium
 
       - name: Download EraX-NSFW model (cache miss only)
-        if: steps.check-mode.outputs.mode == 'auto' && steps.cache-model.outputs.cache-hit != 'true'
+        if: steps.check-mode.outputs.mode != 'manual' && steps.cache-model.outputs.cache-hit != 'true'
         run: python scripts/ensure_erax_model.py
 
       - name: Smoke-test censorship dependencies
-        if: steps.check-mode.outputs.mode == 'auto'
+        if: steps.check-mode.outputs.mode != 'manual'
         run: python -c "import ultralytics, PIL; print('ok')"
 
       - name: Generate candidate post
@@ -82,6 +84,8 @@ jobs:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCOUNTS_JSON: ${{ secrets.X_ACCOUNTS_JSON }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm run generate
 
       # SQLiteは外部ホスティングせずリポジトリに置いているため、実行後の状態をbotコミットで戻す。
