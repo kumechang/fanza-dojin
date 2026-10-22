@@ -1,0 +1,101 @@
+# Telegramに届いた確認依頼(黒塗り済み画像)の「承認して投稿」/「却下」ボタンの押下を処理し、
+# 承認されたものをXへ投稿する(approvalMode: "telegram"用。handle-approval.ymlのTelegram版)。
+#
+# GitHub ActionsはTelegramのWebhookを直接受けられないため、cron-job.orgから数分おきに
+# workflow_dispatchで起動してもらい、getUpdatesのポーリングでボタン押下を拾う。
+# 押下が無い回に重いセットアップ(依存インストール・検閲モデルの準備)を走らせないよう、
+# 最初のジョブでgetUpdatesを軽く覗き、未処理の押下がある場合だけ2つ目のジョブを動かす。
+name: Handle Telegram Approvals
+
+on:
+  workflow_dispatch: {}
+
+# generate-posts.yml等とdata/app.dbへの書き込みが競合しないよう直列化する。
+concurrency:
+  group: db-write
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      pending: ${{ steps.peek.outputs.pending }}
+    steps:
+      - id: peek
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          response=$(curl -sS --fail "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?allowed_updates=%5B%22callback_query%22%5D&limit=1&timeout=0")
+          echo "$response" | jq -e '.ok == true' > /dev/null
+          count=$(echo "$response" | jq '.result | length')
+          echo "unprocessed updates: ${count}"
+          echo "pending=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  handle:
+    needs: check
+    if: needs.check.outputs.pending == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      # 承認された投稿は、投稿確定時に改めて画像を検閲するため(finalizeApprovedPost)Pythonが必要。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - name: Cache EraX-NSFW model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/erax_nsfw_yolo11m.pt
+          key: erax-nsfw-model-v1-medium
+
+      - name: Download EraX-NSFW model (cache miss only)
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: python scripts/ensure_erax_model.py
+
+      - name: Smoke-test censorship dependencies
+        run: python -c "import ultralytics, PIL; print('ok')"
+
+      - name: Handle Telegram approvals
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCOUNTS_JSON: ${{ secrets.X_ACCOUNTS_JSON }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: npm run handle-telegram
+
+      # if: always() — 承認後の投稿が途中で失敗しても、承認の事実や進捗(thread_tweet_ids等)・
+      # post_failedへの状態遷移はコミットして残す(再試行ボタンが進捗から再開できるようにするため)。
+      - name: Commit DB changes
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/app.db
+          if git diff --cached --quiet; then
+            echo "no DB changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(db): update after telegram approval run [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push && break
+            echo "push failed, retrying ($i)..."
+            sleep 5
+          done

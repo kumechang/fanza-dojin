@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { AppConfig } from "../config/types.js";
-import { getUsedContentIds } from "../db/repositories/postsRepo.js";
+import { getUsedContentIds, type PostStatus } from "../db/repositories/postsRepo.js";
 import { getAnalyzedCandidatesOrderedByRank } from "../db/repositories/fanzaCandidatesRepo.js";
 import { selectPostablePageIndices, isWorkPostable, type PageRedactionInfo } from "./redactionPolicy.js";
 import { logger } from "../lib/logger.js";
@@ -34,7 +34,9 @@ export function selectFanzaCandidate(
   config: AppConfig,
   accountName: string
 ): SelectedFanzaCandidate | null {
-  const usedContentIds = getUsedContentIds(db, accountName);
+  const extraStatuses: PostStatus[] =
+    config.approvalMode === "telegram" ? ["pending_approval", "rejected", "post_failed"] : [];
+  const usedContentIds = getUsedContentIds(db, accountName, extraStatuses);
   const { maxPageRedactionRatio, maxUnpostablePageRatio } = config.fanza;
 
   for (const row of getAnalyzedCandidatesOrderedByRank(db)) {

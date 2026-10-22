@@ -1,6 +1,8 @@
 // config/app.json の型定義。
 export interface AppConfig {
-  approvalMode: "manual" | "auto";
+  // manual: GitHub Issueへのコメントで承認 / auto: 承認なしで即投稿 /
+  // telegram: 黒塗り済み画像をTelegramで人間が確認し、ボタンで承認/却下(アダルト画像をGitHubに上げないため)。
+  approvalMode: "manual" | "auto" | "telegram";
   claudeModel: string; // 投稿時間帯の重み分析(analyzePostingTimes)にのみ使用
   platform: string;
   xCharLimit: number;

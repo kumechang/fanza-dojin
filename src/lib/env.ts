@@ -16,6 +16,11 @@ export const env = {
     apiId: process.env.FANZA_API_ID ?? "",
     affiliateId: process.env.FANZA_AFFILIATE_ID ?? "",
   },
+  telegram: {
+    botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
+    // 承認者本人との1対1チャットのID。このチャット以外からの承認操作は受け付けない。
+    chatId: process.env.TELEGRAM_CHAT_ID ?? "",
+  },
 };
 
 export function hasAnthropicKey(): boolean {
@@ -95,6 +100,10 @@ export function filterActiveAccounts(
 
 export function hasXCredentials(accountName: string): boolean {
   return env.x.apiKey.length > 0 && env.x.apiSecret.length > 0 && findXAccount(accountName) !== undefined;
+}
+
+export function hasTelegramCredentials(): boolean {
+  return env.telegram.botToken.length > 0 && env.telegram.chatId.length > 0;
 }
 
 export function hasFanzaCredentials(): boolean {

@@ -34,6 +34,11 @@ function markUsed(db: Database.Database, accountName: string, contentId: string)
   db.prepare(`UPDATE posts SET status = 'posted' WHERE id = ?`).run(id);
 }
 
+function markWithStatus(db: Database.Database, accountName: string, contentId: string, status: string): void {
+  markUsed(db, accountName, contentId);
+  db.prepare(`UPDATE posts SET status = ? WHERE account_name = ? AND content_id = ?`).run(status, accountName, contentId);
+}
+
 // プールに1件追加し、指定のページごとの黒塗り率(ratios)で解析済みにする。
 function addAnalyzedCandidate(
   db: Database.Database,
@@ -167,6 +172,21 @@ describe("selectFanzaCandidate", () => {
 
     const result = selectFanzaCandidate(db, baseConfig(), "account1");
     expect(result?.contentId).toBe("a1");
+  });
+
+  it("in telegram mode, also skips works that are awaiting review, rejected, or failed", () => {
+    addAnalyzedCandidate(db, "pending", [0.02], { rankOrder: 1 });
+    addAnalyzedCandidate(db, "rejected", [0.02], { rankOrder: 2 });
+    addAnalyzedCandidate(db, "failed", [0.02], { rankOrder: 3 });
+    addAnalyzedCandidate(db, "fresh", [0.02], { rankOrder: 4 });
+    markWithStatus(db, "acc", "pending", "pending_approval");
+    markWithStatus(db, "acc", "rejected", "rejected");
+    markWithStatus(db, "acc", "failed", "post_failed");
+
+    const telegram = { ...baseConfig(), approvalMode: "telegram" as const };
+    expect(selectFanzaCandidate(db, telegram, "acc")?.contentId).toBe("fresh");
+    // 既定(manual/auto)では確認待ち・却下・失敗は除外しない(従来どおり)
+    expect(selectFanzaCandidate(db, baseConfig(), "acc")?.contentId).toBe("pending");
   });
 
   it("prefers the better-ranked candidate among eligible ones", () => {
