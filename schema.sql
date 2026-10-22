@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS posts (
   thread_tweet_ids TEXT NOT NULL DEFAULT '[]',    -- JSON配列。[0]=先頭ツイート, 以降=画像リプライ, 最後=アフィリエイトリンク
   images_posted_count INTEGER NOT NULL DEFAULT 0, -- スレッドに貼り終えたサンプル画像の累計枚数
   affiliate_tweet_posted INTEGER NOT NULL DEFAULT 0, -- アフィリエイトリンクのリプライまで完了したか(0/1)
+  selected_image_indices TEXT, -- Telegram承認で人が選んだ画像のsample_image_urls上の添字(JSON配列、昇順)。NULLは全画像を投稿する
 
   tweet_id TEXT,   -- 先頭ツイートのID。post_metricsが参照する
   tweet_url TEXT,

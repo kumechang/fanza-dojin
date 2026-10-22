@@ -17,6 +17,11 @@ export interface AppConfig {
   targetPostsPerDay: number;
   // 直近の投稿候補作成からこの時間(h)未満なら、次の生成をスキップする(連投防止)。
   minSpacingHours: number;
+  // approvalModeがtelegramのときのバッチ確認の設定(省略時は size=20, maxSendPerRun=3)。
+  telegramBatch?: {
+    size: number; // ランク上位から数えて、確認待ち(未処理)にしておく作品数の上限
+    maxSendPerRun: number; // 1回のgenerate実行でTelegramへ送る作品数の上限(送信レート制限対策)
+  };
   // サンプル画像の性的な描写部分をEraX-NSFW(YOLO11)で検出し黒塗りするかどうか。
   // false時は検閲をスキップしてそのまま投稿する(検出モデル側の不具合等に備えた緊急停止用)。
   censorSampleImages: boolean;

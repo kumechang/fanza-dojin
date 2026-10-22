@@ -3,7 +3,15 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { describe, it, expect, beforeEach } from "vitest";
 import { handleTelegramUpdates } from "../src/pipeline/handleTelegramUpdates.js";
-import { createPost, getPostById, markPosted, markPostFailed, setLeadTweet } from "../src/db/repositories/postsRepo.js";
+import {
+  createPost,
+  getPostById,
+  getSelectedImageIndices,
+  markPosted,
+  markPostFailed,
+  setLeadTweet,
+  toggleSelectedImage,
+} from "../src/db/repositories/postsRepo.js";
 import type { AppConfig } from "../src/config/types.js";
 import type { InlineButton, TelegramApi, TelegramUpdate } from "../src/telegram/client.js";
 
@@ -22,7 +30,7 @@ function newPost(db: Database.Database): number {
     content_id: "d_1",
     title: "title",
     affiliate_url: "https://example.com",
-    sample_image_urls: [],
+    sample_image_urls: ["https://example.com/0.jpg", "https://example.com/1.jpg", "https://example.com/2.jpg"],
     price: null,
     list_price: null,
     campaign_title: null,
@@ -34,13 +42,13 @@ function newPost(db: Database.Database): number {
   });
 }
 
-function callback(postId: number, action: "approve" | "reject", fromId = OWNER, updateId = 1): TelegramUpdate {
+function callback(postId: number, action: "approve" | "reject" | "toggle", fromId = OWNER, updateId = 1, imageIndex = 0): TelegramUpdate {
   return {
     update_id: updateId,
     callback_query: {
       id: `cq${updateId}`,
       from: { id: fromId, username: "owner" },
-      data: `${action}:${postId}`,
+      data: action === "toggle" ? `toggle:${postId}:${imageIndex}` : `${action}:${postId}`,
       message: { message_id: 50, text: "preview text", chat: { id: fromId } },
     },
   };
@@ -50,7 +58,8 @@ function fakeApi(updates: TelegramUpdate[], opts: { answerThrows?: boolean } = {
   const log = {
     offsets: [] as (number | undefined)[],
     answers: [] as string[],
-    edits: [] as { text: string; buttons?: InlineButton[] }[],
+    edits: [] as { text: string; buttons?: InlineButton[][] }[],
+    markups: [] as InlineButton[][][],
   };
   const api: TelegramApi = {
     async getUpdates(offset) {
@@ -63,6 +72,9 @@ function fakeApi(updates: TelegramUpdate[], opts: { answerThrows?: boolean } = {
     },
     async editMessageText(_chat, _msg, text, buttons) {
       log.edits.push({ text, buttons });
+    },
+    async editMessageButtons(_chat, _msg, buttons) {
+      log.markups.push(buttons);
     },
   };
   return { api, log };
@@ -81,6 +93,7 @@ describe("handleTelegramUpdates", () => {
 
   it("approves, finalizes the post, and reports the tweet url", async () => {
     const id = newPost(db);
+    toggleSelectedImage(db, id, 0);
     const { api, log } = fakeApi([callback(id, "approve", OWNER, 7)]);
     let finalizedStatus: string | undefined;
 
@@ -90,12 +103,49 @@ describe("handleTelegramUpdates", () => {
       markPosted(db, id);
     });
 
-    expect(result).toEqual({ approved: 1, rejected: 0, ignored: 0, failed: 0 });
+    expect(result).toEqual({ approved: 1, rejected: 0, toggled: 0, ignored: 0, failed: 0 });
     expect(finalizedStatus).toBe("approved");
     expect(getPostById(db, id)?.status).toBe("posted");
     expect(log.edits.at(-1)?.text).toContain("[投稿完了] https://x.com/acc/status/1");
     expect(log.edits.at(-1)?.buttons).toBeUndefined();
     expect(log.offsets).toEqual([undefined, 8]);
+  });
+
+  it("toggles image selection and refreshes the buttons", async () => {
+    const id = newPost(db);
+    const { api, log } = fakeApi([callback(id, "toggle", OWNER, 1, 2), callback(id, "toggle", OWNER, 2, 0), callback(id, "toggle", OWNER, 3, 2)]);
+
+    const result = await run(api);
+
+    expect(result.toggled).toBe(3);
+    expect(getSelectedImageIndices(getPostById(db, id)!)).toEqual([0]);
+    expect(log.answers).toEqual(["1枚選択中", "2枚選択中", "1枚選択中"]);
+    expect(log.markups.at(-1)?.[0]?.map((b) => b.text)).toEqual(["✅1", "2", "3"]);
+    expect(log.markups.at(-1)?.at(-1)?.[0]?.text).toContain("1枚");
+    expect(getPostById(db, id)?.status).toBe("pending_approval");
+  });
+
+  it("refuses to post when no image is selected", async () => {
+    const id = newPost(db);
+    const { api, log } = fakeApi([callback(id, "approve")]);
+    let finalized = false;
+
+    const result = await run(api, async () => {
+      finalized = true;
+    });
+
+    expect(result.ignored).toBe(1);
+    expect(finalized).toBe(false);
+    expect(log.answers[0]).toContain("1枚以上");
+    expect(getPostById(db, id)?.status).toBe("pending_approval");
+  });
+
+  it("does not change the selection once the post is approved", async () => {
+    const id = newPost(db);
+    toggleSelectedImage(db, id, 0);
+    db.prepare(`UPDATE posts SET status = 'post_failed' WHERE id = ?`).run(id);
+    expect(toggleSelectedImage(db, id, 1)).toBeNull();
+    expect(getSelectedImageIndices(getPostById(db, id)!)).toEqual([0]);
   });
 
   it("rejects without finalizing", async () => {
@@ -144,6 +194,7 @@ describe("handleTelegramUpdates", () => {
 
   it("reports failure with retry button, and the retry succeeds from post_failed", async () => {
     const id = newPost(db);
+    toggleSelectedImage(db, id, 1);
     const first = fakeApi([callback(id, "approve", OWNER, 1)]);
 
     const failed = await run(first.api, async () => {
@@ -154,7 +205,7 @@ describe("handleTelegramUpdates", () => {
     expect(failed.failed).toBe(1);
     const last = first.log.edits.at(-1)!;
     expect(last.text).toContain("[投稿失敗] X API error");
-    expect(last.buttons?.map((b) => b.callback_data)).toEqual([`approve:${id}`, `reject:${id}`]);
+    expect(last.buttons?.[0]?.map((b) => b.callback_data)).toEqual([`approve:${id}`, `reject:${id}`]);
     expect(getPostById(db, id)?.status).toBe("post_failed");
 
     const retry = fakeApi([callback(id, "approve", OWNER, 2)]);

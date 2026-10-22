@@ -34,6 +34,17 @@ export function selectFanzaCandidate(
   config: AppConfig,
   accountName: string
 ): SelectedFanzaCandidate | null {
+  return selectFanzaCandidates(db, config, accountName, 1)[0] ?? null;
+}
+
+// 上と同じ条件で、ランクの良い順に最大limit件を選ぶ(Telegramのバッチ確認用)。
+export function selectFanzaCandidates(
+  db: Database.Database,
+  config: AppConfig,
+  accountName: string,
+  limit: number
+): SelectedFanzaCandidate[] {
+  const selected: SelectedFanzaCandidate[] = [];
   const extraStatuses: PostStatus[] =
     config.approvalMode === "telegram" ? ["pending_approval", "rejected", "post_failed"] : [];
   const usedContentIds = getUsedContentIds(db, accountName, extraStatuses);
@@ -49,7 +60,7 @@ export function selectFanzaCandidate(
     const postableIndices = selectPostablePageIndices(detail, maxPageRedactionRatio);
     const sampleImageUrls = postableIndices.map((i) => allImageUrls[i]!);
 
-    return {
+    selected.push({
       contentId: row.content_id,
       title: row.title,
       affiliateUrl: row.affiliate_url,
@@ -63,12 +74,15 @@ export function selectFanzaCandidate(
       rankOrder: row.rank_order,
       totalPageCount: allImageUrls.length,
       droppedPageCount: allImageUrls.length - sampleImageUrls.length,
-    };
+    });
+    if (selected.length >= limit) break;
   }
 
-  logger.info("no eligible pooled FANZA candidate found (pool empty or all rejected by redaction policy)", {
-    maxPageRedactionRatio,
-    maxUnpostablePageRatio,
-  });
-  return null;
+  if (selected.length === 0) {
+    logger.info("no eligible pooled FANZA candidate found (pool empty or all rejected by redaction policy)", {
+      maxPageRedactionRatio,
+      maxUnpostablePageRatio,
+    });
+  }
+  return selected;
 }

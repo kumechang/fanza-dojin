@@ -45,7 +45,11 @@ export async function finalizeApprovedPost(db: Database.Database, config: AppCon
   }
 
   try {
-    const sampleImageUrls = JSON.parse(post.sample_image_urls) as string[];
+    const allImageUrls = JSON.parse(post.sample_image_urls) as string[];
+    // Telegramで人が選んだ画像がある場合は、その画像だけを番号順に投稿する(未選択=全画像)。
+    const sampleImageUrls = post.selected_image_indices
+      ? (JSON.parse(post.selected_image_indices) as number[]).map((i) => allImageUrls[i]!).filter(Boolean)
+      : allImageUrls;
     let current = post;
 
     // ① 先頭ツイート(タイトル+先頭imagesPerTweet枚)。まだ投稿していなければ実行する。

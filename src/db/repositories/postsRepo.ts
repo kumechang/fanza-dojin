@@ -51,6 +51,7 @@ export interface PostRow {
   thread_tweet_ids: string;
   images_posted_count: number;
   affiliate_tweet_posted: number;
+  selected_image_indices: string | null;
   tweet_id: string | null;
   tweet_url: string | null;
   post_error: string | null;
@@ -214,4 +215,36 @@ export function markPostFailed(db: Database.Database, id: number, error: string)
   db.prepare(
     `UPDATE posts SET status = 'post_failed', post_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
   ).run(error, id);
+}
+
+// Telegram承認で人が選んだ画像の添字(sample_image_urls上)。未選択(NULL)は空配列として返す。
+export function getSelectedImageIndices(post: PostRow): number[] {
+  return post.selected_image_indices ? (JSON.parse(post.selected_image_indices) as number[]) : [];
+}
+
+// 画像の選択をトグルする。確認待ち(pending_approval)の間だけ変更でき、承認後は
+// 投稿内容がぶれて再試行時に枚数がずれないよう固定する。変更後の添字(昇順)を返し、
+// 対象外ならnullを返す。
+export function toggleSelectedImage(db: Database.Database, id: number, index: number): number[] | null {
+  const post = getPostById(db, id);
+  if (!post || post.status !== "pending_approval") return null;
+  const total = (JSON.parse(post.sample_image_urls) as string[]).length;
+  if (index < 0 || index >= total) return null;
+
+  const selected = new Set(getSelectedImageIndices(post));
+  if (!selected.delete(index)) selected.add(index);
+  const next = [...selected].sort((a, b) => a - b);
+  db.prepare(`UPDATE posts SET selected_image_indices = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
+    JSON.stringify(next),
+    id
+  );
+  return next;
+}
+
+// Telegram確認待ちの件数。バッチの送信上限(確認待ちが溜まっている間は追加しない)の判定に使う。
+export function countPendingApproval(db: Database.Database, accountName: string): number {
+  const row = db
+    .prepare(`SELECT COUNT(*) as n FROM posts WHERE account_name = ? AND status = 'pending_approval'`)
+    .get(accountName) as { n: number };
+  return row.n;
 }

@@ -65,6 +65,16 @@ describe("telegram client", () => {
     expect(form.get("page2")).toBeInstanceOf(Blob);
   });
 
+  it("attaches captions to media group items", async () => {
+    const calls = stubFetch({ ok: true, status: 200, json: { ok: true, result: [] } });
+    const { sendImages } = await import("../src/telegram/client.js");
+
+    await sendImages([image, image], ["1", "2"]);
+
+    const media = JSON.parse((calls[0]!.body as FormData).get("media") as string);
+    expect(media.map((m: { caption: string }) => m.caption)).toEqual(["1", "2"]);
+  });
+
   it("sends nothing for an empty image list", async () => {
     const calls = stubFetch({ ok: true, status: 200, json: { ok: true, result: {} } });
     const { sendImages } = await import("../src/telegram/client.js");
@@ -76,7 +86,7 @@ describe("telegram client", () => {
     const calls = stubFetch({ ok: true, status: 200, json: { ok: true, result: {} } });
     const { sendMessageWithButtons } = await import("../src/telegram/client.js");
 
-    await sendMessageWithButtons("hello", [{ text: "OK", callback_data: "approve:1" }]);
+    await sendMessageWithButtons("hello", [[{ text: "OK", callback_data: "approve:1" }]]);
 
     const body = JSON.parse(calls[0]!.body as string);
     expect(body).toMatchObject({
