@@ -121,11 +121,21 @@ npm run typecheck
 
 ### 流れ
 
-1. `generate-posts`が候補を選び、サンプル画像を黒塗りして、承認者のTelegramチャットへ送る(`protect_content`で転送・保存を禁止、リンクプレビューは無効)。末尾のメッセージに「承認して投稿」「却下」ボタンが付く。この時点では投稿しない(`posts.status = pending_approval`)
-2. ボタンの押下を`handle-telegram.yml`がポーリング(`getUpdates`)で拾う。承認なら`finalizeApprovedPost`でXへスレッド投稿し、結果(投稿URL / 失敗理由)を同じメッセージに追記してボタンを消す。却下なら`rejected`にする
-3. 投稿失敗時は「再試行」ボタンが付く。進捗はDBに保存されているため途中から再開し、重複投稿しない
+1. `generate-posts`が、投稿可能な作品のうちランク上位を順に選び、サンプル画像を黒塗りして承認者のTelegramチャットへ送る(`protect_content`で転送・保存を禁止、リンクプレビューは無効)。画像には通し番号が付き、末尾のメッセージに番号ボタン`[1][2][3]…`と「この選択で投稿」「却下」ボタンが付く。この時点では投稿しない(`posts.status = pending_approval`)
+2. 番号ボタンを押すと、その画像の選択がON/OFFに切り替わる(選択中は✅)。選択は`posts.selected_image_indices`に保存される。1枚も選ばずに「この選択で投稿」を押しても何も起きない
+3. ボタンの押下を`handle-telegram.yml`がポーリング(`getUpdates`)で拾う。「この選択で投稿」なら`finalizeApprovedPost`が**選んだ画像だけを番号順に**Xへスレッド投稿し、結果(投稿URL / 失敗理由)を同じメッセージに追記してボタンを消す。却下なら`rejected`にする。承認後は選択を変更できない
+4. 投稿失敗時は「再試行」ボタンが付く。進捗はDBに保存されているため途中から再開し、重複投稿しない
 
 確認時に見た画像と投稿される画像は、同じ画像を同じ検閲モデル・閾値で処理するため一致する(投稿確定時に改めて黒塗りする)。
+
+### バッチ送信の設定
+
+`config/app.json`の`telegramBatch`で調整する。Telegramは同じチャットへの送信にレート制限があるため、1回の実行で送る作品数を絞り、残りは次の実行で送る。
+
+- `size`(既定20): 確認待ち(`pending_approval`)にしておく作品数の上限。この件数に達している間は追加で送らない
+- `maxSendPerRun`(既定3): 1回の`generate-posts`実行でTelegramへ送る作品数の上限
+
+Telegramモードでは投稿可能時間帯(`postingWindow`)と生成頻度の抑制(`targetPostsPerDay` / `minSpacingHours`)は使わない(確認依頼を送るだけで、投稿は承認した時点で行われるため)。
 
 ### 選定時の挙動
 

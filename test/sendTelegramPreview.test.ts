@@ -23,7 +23,7 @@ describe("buildPreviewText", () => {
     expect(text).toContain("[acc]");
     expect(text).toContain("作品タイトル");
     expect(text).toContain("300円 → 100円");
-    expect(text).toContain("投稿予定の画像: 4枚");
+    expect(text).toContain("画像: 4枚");
     expect(text).not.toContain("http");
   });
 
@@ -41,7 +41,15 @@ describe("buildPreviewText", () => {
 
 describe("buildReviewButtons", () => {
   it("builds approve and reject buttons carrying the post id", () => {
-    expect(buildReviewButtons(7).map((b) => b.callback_data)).toEqual(["approve:7", "reject:7"]);
+    expect(buildReviewButtons(7, 0).flat().map((b) => b.callback_data)).toEqual(["approve:7", "reject:7"]);
+  });
+
+  it("builds numbered toggle buttons in rows of five, marking selected images", () => {
+    const rows = buildReviewButtons(7, 7, [1, 6]);
+    expect(rows.map((r) => r.length)).toEqual([5, 2, 2]);
+    expect(rows.flat().slice(0, 7).map((b) => b.text)).toEqual(["1", "✅2", "3", "4", "5", "6", "✅7"]);
+    expect(rows[1]![0]!.callback_data).toBe("toggle:7:5");
+    expect(rows[2]![0]!.text).toBe("この選択で投稿(2枚)");
   });
 });
 
@@ -55,6 +63,7 @@ describe("sendTelegramPreview", () => {
 
   it("sends censored images in groups of 10, then the message with buttons", async () => {
     const groups: number[] = [];
+    const captionsSent: string[] = [];
     const censored: string[] = [];
     let message: { text: string; ids: string[] } | undefined;
 
@@ -64,17 +73,20 @@ describe("sendTelegramPreview", () => {
         censored.push(...images.map((i) => i.buffer.toString()));
         return images.map((i) => image(`censored:${i.buffer.toString()}`));
       },
-      sendImagesFn: async (images) => {
+      sendImagesFn: async (images, captions) => {
         groups.push(images.length);
+        captionsSent.push(...captions);
       },
       sendMessageFn: async (text, buttons) => {
-        message = { text, ids: buttons.map((b) => b.callback_data) };
+        message = { text, ids: buttons.flat().map((b) => b.callback_data) };
       },
     });
 
     expect(censored).toHaveLength(12);
     expect(groups).toEqual([10, 2]);
-    expect(message?.ids).toEqual(["approve:9", "reject:9"]);
+    expect(captionsSent).toEqual(Array.from({ length: 12 }, (_, i) => String(i + 1)));
+    expect(message?.ids.slice(0, 2)).toEqual(["toggle:9:0", "toggle:9:1"]);
+    expect(message?.ids.slice(-2)).toEqual(["approve:9", "reject:9"]);
   });
 
   it("sends nothing when censorship fails", async () => {

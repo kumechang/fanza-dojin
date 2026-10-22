@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { describe, it, expect, beforeEach } from "vitest";
-import { selectFanzaCandidate } from "../src/fanza/selectCandidate.js";
+import { selectFanzaCandidate, selectFanzaCandidates } from "../src/fanza/selectCandidate.js";
 import { upsertCandidate, markAnalyzed } from "../src/db/repositories/fanzaCandidatesRepo.js";
 import { createPost } from "../src/db/repositories/postsRepo.js";
 import type { AppConfig } from "../src/config/types.js";
@@ -195,5 +195,19 @@ describe("selectFanzaCandidate", () => {
 
     const result = selectFanzaCandidate(db, baseConfig(), "account1");
     expect(result?.contentId).toBe("a2");
+  });
+});
+
+describe("selectFanzaCandidates", () => {
+  it("returns up to the limit in rank order, skipping unpostable and used works", () => {
+    const db = createTestDb();
+    addAnalyzedCandidate(db, "c3", [0.01], { rankOrder: 3 });
+    addAnalyzedCandidate(db, "c1", [0.01], { rankOrder: 1 });
+    addAnalyzedCandidate(db, "bad", [0.9], { rankOrder: 2 });
+    addAnalyzedCandidate(db, "c4", [0.01], { rankOrder: 4 });
+    markUsed(db, "account1", "c3");
+
+    const result = selectFanzaCandidates(db, baseConfig(), "account1", 2);
+    expect(result.map((c) => c.contentId)).toEqual(["c1", "c4"]);
   });
 });

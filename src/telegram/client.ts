@@ -25,7 +25,8 @@ export interface TelegramUpdate {
 export interface TelegramApi {
   getUpdates(offset?: number): Promise<TelegramUpdate[]>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
-  editMessageText(chatId: number, messageId: number, text: string, buttons?: InlineButton[]): Promise<void>;
+  editMessageText(chatId: number, messageId: number, text: string, buttons?: InlineButton[][]): Promise<void>;
+  editMessageButtons(chatId: number, messageId: number, buttons: InlineButton[][]): Promise<void>;
 }
 
 async function call<T>(method: string, body: Record<string, unknown> | FormData): Promise<T> {
@@ -48,7 +49,7 @@ function toBlob(image: DownloadedImage): Blob {
 
 // 画像を承認者のチャットに送る。mediaGroupは2〜10枚が条件のため、1枚だけの場合はsendPhotoを使う。
 // protect_contentで転送・保存を禁止する(アダルト画像が意図せず外へ出るのを防ぐ)。
-export async function sendImages(images: DownloadedImage[]): Promise<void> {
+export async function sendImages(images: DownloadedImage[], captions?: string[]): Promise<void> {
   if (images.length === 0) return;
 
   const form = new FormData();
@@ -56,25 +57,35 @@ export async function sendImages(images: DownloadedImage[]): Promise<void> {
   form.append("protect_content", "true");
 
   if (images.length === 1) {
+    if (captions?.[0]) form.append("caption", captions[0]);
     form.append("photo", toBlob(images[0]!), "page.jpg");
     await call("sendPhoto", form);
     return;
   }
 
-  form.append("media", JSON.stringify(images.map((_, i) => ({ type: "photo", media: `attach://page${i}` }))));
+  form.append(
+    "media",
+    JSON.stringify(
+      images.map((_, i) => ({
+        type: "photo",
+        media: `attach://page${i}`,
+        ...(captions?.[i] ? { caption: captions[i] } : {}),
+      }))
+    )
+  );
   images.forEach((image, i) => form.append(`page${i}`, toBlob(image), `page${i}.jpg`));
   await call("sendMediaGroup", form);
 }
 
-// 承認/却下ボタン付きのメッセージを送る。リンクプレビューは無効化する
+// ボタン(行ごとの配列)付きのメッセージを送る。リンクプレビューは無効化する
 // (プレビューにFANZAの黒塗り前の画像が展開されるのを防ぐ)。
-export async function sendMessageWithButtons(text: string, buttons: InlineButton[]): Promise<void> {
+export async function sendMessageWithButtons(text: string, buttons: InlineButton[][]): Promise<void> {
   await call("sendMessage", {
     chat_id: env.telegram.chatId,
     text,
     protect_content: true,
     link_preview_options: { is_disabled: true },
-    reply_markup: { inline_keyboard: [buttons] },
+    reply_markup: { inline_keyboard: buttons },
   });
 }
 
@@ -97,7 +108,15 @@ export const telegramApi: TelegramApi = {
       message_id: messageId,
       text,
       link_preview_options: { is_disabled: true },
-      reply_markup: { inline_keyboard: buttons ? [buttons] : [] },
+      reply_markup: { inline_keyboard: buttons ?? [] },
+    });
+  },
+
+  async editMessageButtons(chatId, messageId, buttons) {
+    await call("editMessageReplyMarkup", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: buttons },
     });
   },
 };

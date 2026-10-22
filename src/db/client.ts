@@ -32,6 +32,15 @@ export function getDb(): Database.Database {
     }
   }
 
+  if (postsTableExists) {
+    const hasSelected = db
+      .prepare(`SELECT 1 FROM pragma_table_info('posts') WHERE name = 'selected_image_indices'`)
+      .get();
+    if (!hasSelected) {
+      db.exec(`ALTER TABLE posts ADD COLUMN selected_image_indices TEXT`);
+    }
+  }
+
   const schema = readFileSync(SCHEMA_PATH, "utf-8");
   db.exec(schema);
 

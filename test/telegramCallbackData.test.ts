@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { buildCallbackData, parseCallbackData } from "../src/telegram/callbackData.js";
+import { buildCallbackData, buildToggleCallbackData, parseCallbackData } from "../src/telegram/callbackData.js";
 
 describe("callback data", () => {
   it("round-trips approve and reject", () => {
     expect(parseCallbackData(buildCallbackData("approve", 12))).toEqual({ action: "approve", postId: 12 });
     expect(parseCallbackData(buildCallbackData("reject", 3))).toEqual({ action: "reject", postId: 3 });
+  });
+
+  it("round-trips toggle with the image index", () => {
+    expect(parseCallbackData(buildToggleCallbackData(12, 4))).toEqual({ action: "toggle", postId: 12, imageIndex: 4 });
+    expect(parseCallbackData("toggle:12")).toBeNull();
   });
 
   it("returns null for malformed or unknown data", () => {

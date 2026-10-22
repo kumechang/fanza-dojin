@@ -9,6 +9,10 @@
   },
   "targetPostsPerDay": 4,
   "minSpacingHours": 2,
+  "telegramBatch": {
+    "size": 20,
+    "maxSendPerRun": 3
+  },
   "censorSampleImages": true,
   "pausedAccountNames": ["fk4eqg"],
   "fanza": {

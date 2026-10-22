@@ -1,6 +1,7 @@
 import { getDb } from "../db/client.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { generateCandidate } from "../pipeline/generateCandidate.js";
+import { generateTelegramBatch } from "../pipeline/generateTelegramBatch.js";
 import { listXAccounts, filterActiveAccounts } from "../lib/env.js";
 import { logger } from "../lib/logger.js";
 
@@ -19,6 +20,11 @@ async function main(): Promise<void> {
 
   for (const account of accounts) {
     try {
+      if (config.approvalMode === "telegram") {
+        const postIds = await generateTelegramBatch(db, config, account.name);
+        logger.info("generate finished", { accountName: account.name, postIds });
+        continue;
+      }
       const postId = await generateCandidate(db, config, account.name);
       logger.info("generate finished", { accountName: account.name, postId });
     } catch (error) {
