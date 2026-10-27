@@ -24,6 +24,7 @@
     "poolFetchPages": 5,
     "maxAnalysisPerRun": 20,
     "maxPageRedactionRatio": 0.3,
-    "maxUnpostablePageRatio": 0.5
+    "maxUnpostablePageRatio": 0.5,
+    "candidateMaxAgeHours": 24
   }
 }

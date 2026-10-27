@@ -96,6 +96,12 @@ CREATE TABLE IF NOT EXISTS fanza_candidates (
   analyzed_at TEXT,
 
   fetched_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  -- fetch-candidatesが直近でこの作品を「コミック×値引き中」として観測した時刻。
+  -- セールが終わった作品はfetchで見えなくなりここが更新されなくなるため、選定時に
+  -- 一定時間(fanza.candidateMaxAgeHours)以内に観測されたものだけを対象にして
+  -- セール終了済みの作品を除外する。解析結果は消さない(セール復活時に再解析不要)。
+  -- NULL(この列の追加前から存在した行)は未観測扱いで、次回のfetchで再観測されるまで選定対象外。
+  last_seen_at TEXT,
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_fanza_candidates_selection ON fanza_candidates(redaction_status, rank_order);

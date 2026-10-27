@@ -99,10 +99,15 @@ npm run typecheck
 `src/fanza/selectCandidate.ts`が、投稿候補プール(`fanza_candidates`)から以下をすべて満たす作品を、`rank_order`(取得時点のランク順の目安、値が小さいほど人気)が良い順に1件選ぶ。**FANZA APIのライブ呼び出しはここでは行わない**。
 
 - 黒塗り要否の解析が完了している(`redaction_status = 'analyzed'`)
+- 直近`fanza.candidateMaxAgeHours`(既定24時間)以内に`fetch-candidates`がセール中として観測している(`last_seen_at`)。セールが終わった作品はfetchで見えなくなり`last_seen_at`が更新されなくなるため、期限を過ぎたものは自動的に選定対象から外れる
 - まだ候補にしたことがない(`posts`テーブルの`content_id`で、承認済み・投稿済みのものだけを除外対象にする。却下・投稿失敗した作品は限られたセール在庫の中で再候補になり得るため除外しない)
 - 投稿可能と判定されている(`src/fanza/redactionPolicy.ts`、詳細は次項)
 
 サンプル画像URLがバッチ取得時から変わっていた場合(セールの入れ替わり等)、その候補の`redaction_status`は自動的に`pending`へ戻り、次回の`fetch-candidates`実行で再解析される。
+
+`last_seen_at`による除外は選定時に判定するだけで、プールの行や黒塗りの解析結果は消さない。セールが一時的に外れて戻ってきた作品は、再観測された時点でそのまま選定対象に復帰する(YOLOの再解析は不要)。`candidateMaxAgeHours`は`fetch-candidates`の実行間隔より十分長くすること(短いと、fetchの合間に候補が全て期限切れになる)。`fetch-candidates`が止まってプール全体が期限切れになった場合、`generate-posts`のログに「候補が尽きた」ではなく「プールが古い(`fetch-candidates`が動いているか確認)」という警告が出る。
+
+既存のDBには起動時に`last_seen_at`列が自動追加される(既存行は`NULL`=未観測)。そのため反映直後は、次回の`fetch-candidates`が各作品を再観測するまで選定対象が一時的に0件になる。
 
 ### ページ単位の黒塗り判定(redactionPolicy)
 

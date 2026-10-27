@@ -8,6 +8,7 @@ import {
   markAnalyzed,
   markAnalysisFailed,
   getAnalyzedCandidatesOrderedByRank,
+  countAnalyzedCandidates,
 } from "../src/db/repositories/fanzaCandidatesRepo.js";
 
 function createTestDb(): Database.Database {
@@ -16,6 +17,8 @@ function createTestDb(): Database.Database {
   db.exec(schema);
   return db;
 }
+
+const EPOCH = "1970-01-01 00:00:00";
 
 function baseInput(overrides: Partial<Parameters<typeof upsertCandidate>[1]> = {}) {
   return {
@@ -93,7 +96,7 @@ describe("fanzaCandidatesRepo", () => {
     const row = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = 'a1'`).get() as { id: number };
     markAnalysisFailed(db, row.id);
 
-    expect(getAnalyzedCandidatesOrderedByRank(db)).toHaveLength(0);
+    expect(getAnalyzedCandidatesOrderedByRank(db, EPOCH)).toHaveLength(0);
   });
 
   it("getAnalyzedCandidatesOrderedByRank orders by rank_order and excludes pending/failed rows", () => {
@@ -106,7 +109,37 @@ describe("fanzaCandidatesRepo", () => {
     markAnalyzed(db, a2.id, 0.01, []);
     // a3はpendingのまま(未解析)
 
-    const rows = getAnalyzedCandidatesOrderedByRank(db);
+    const rows = getAnalyzedCandidatesOrderedByRank(db, EPOCH);
     expect(rows.map((r) => r.content_id)).toEqual(["a2", "a1"]);
+  });
+
+  const lastSeen = (contentId: string) =>
+    (db.prepare(`SELECT last_seen_at FROM fanza_candidates WHERE content_id = ?`).get(contentId) as {
+      last_seen_at: string | null;
+    }).last_seen_at;
+
+  it("records last_seen_at on insert and refreshes it on every re-upsert", () => {
+    upsertCandidate(db, baseInput());
+    expect(lastSeen("a1")).not.toBeNull();
+
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = '2000-01-01 00:00:00' WHERE content_id = 'a1'`).run();
+    upsertCandidate(db, baseInput());
+    expect(lastSeen("a1")! > "2000-01-01 00:00:00").toBe(true);
+  });
+
+  it("getAnalyzedCandidatesOrderedByRank excludes rows not seen since the cutoff, including never-seen (NULL) rows", () => {
+    for (const id of ["fresh", "stale", "never"]) upsertCandidate(db, baseInput({ content_id: id }));
+    for (const id of ["fresh", "stale", "never"]) {
+      const row = db.prepare(`SELECT id FROM fanza_candidates WHERE content_id = ?`).get(id) as { id: number };
+      markAnalyzed(db, row.id, 0, []);
+    }
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = '2026-10-27 00:00:00' WHERE content_id = 'fresh'`).run();
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = '2026-10-25 00:00:00' WHERE content_id = 'stale'`).run();
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = NULL WHERE content_id = 'never'`).run();
+
+    const rows = getAnalyzedCandidatesOrderedByRank(db, "2026-10-26 00:00:00");
+    expect(rows.map((r) => r.content_id)).toEqual(["fresh"]);
+    // 期限切れでも解析結果自体は残っている(セール復活時に再解析不要)
+    expect(countAnalyzedCandidates(db)).toBe(3);
   });
 });

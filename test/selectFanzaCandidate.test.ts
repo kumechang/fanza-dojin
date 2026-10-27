@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { selectFanzaCandidate, selectFanzaCandidates } from "../src/fanza/selectCandidate.js";
 import { upsertCandidate, markAnalyzed } from "../src/db/repositories/fanzaCandidatesRepo.js";
 import { createPost } from "../src/db/repositories/postsRepo.js";
@@ -102,6 +102,7 @@ function baseConfig(): AppConfig {
       maxAnalysisPerRun: 20,
       maxPageRedactionRatio: 0.3,
       maxUnpostablePageRatio: 0.5,
+      candidateMaxAgeHours: 24,
     },
   };
 }
@@ -187,6 +188,47 @@ describe("selectFanzaCandidate", () => {
     expect(selectFanzaCandidate(db, telegram, "acc")?.contentId).toBe("fresh");
     // 既定(manual/auto)では確認待ち・却下・失敗は除外しない(従来どおり)
     expect(selectFanzaCandidate(db, baseConfig(), "acc")?.contentId).toBe("pending");
+  });
+
+  it("excludes candidates not seen by fetch-candidates within candidateMaxAgeHours (sale likely ended)", () => {
+    addAnalyzedCandidate(db, "stale", [0.02], { rankOrder: 1 });
+    addAnalyzedCandidate(db, "never", [0.02], { rankOrder: 2 });
+    addAnalyzedCandidate(db, "fresh", [0.02], { rankOrder: 3 });
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = '2026-10-25 12:00:00' WHERE content_id = 'stale'`).run();
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = NULL WHERE content_id = 'never'`).run();
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = '2026-10-26 13:00:00' WHERE content_id = 'fresh'`).run();
+
+    // 基準時刻 10/27 12:00、期限24h → 10/26 12:00 以降に観測されたものだけが対象
+    const now = new Date("2026-10-27T12:00:00Z");
+    const result = selectFanzaCandidates(db, baseConfig(), "account1", 10, now);
+    expect(result.map((c) => c.contentId)).toEqual(["fresh"]);
+  });
+
+  it("treats the cutoff boundary as inclusive and honors a custom candidateMaxAgeHours", () => {
+    addAnalyzedCandidate(db, "edge", [0.02]);
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = '2026-10-27 06:00:00' WHERE content_id = 'edge'`).run();
+    const now = new Date("2026-10-27T12:00:00Z");
+    const config = (hours: number) => ({ ...baseConfig(), fanza: { ...baseConfig().fanza, candidateMaxAgeHours: hours } });
+
+    expect(selectFanzaCandidates(db, config(6), "account1", 10, now)).toHaveLength(1);
+    expect(selectFanzaCandidates(db, config(5), "account1", 10, now)).toHaveLength(0);
+  });
+
+  it("warns that the pool is stale (not just empty) when every analyzed candidate has expired", () => {
+    addAnalyzedCandidate(db, "old", [0.02]);
+    db.prepare(`UPDATE fanza_candidates SET last_seen_at = '2020-01-01 00:00:00' WHERE content_id = 'old'`).run();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    expect(selectFanzaCandidates(db, baseConfig(), "account1", 10)).toEqual([]);
+    expect(warn.mock.calls.flat().join("\n")).toContain("stale");
+
+    // プールが単に空のときは「古い」警告を出さない
+    warn.mockClear();
+    expect(selectFanzaCandidates(createTestDb(), baseConfig(), "account1", 10)).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    log.mockRestore();
   });
 
   it("prefers the better-ranked candidate among eligible ones", () => {

@@ -36,6 +36,7 @@ export interface FanzaCandidateRow {
   redaction_detail: string | null;
   analyzed_at: string | null;
   fetched_at: string;
+  last_seen_at: string | null;
   updated_at: string | null;
 }
 
@@ -52,8 +53,8 @@ export function upsertCandidate(db: Database.Database, input: UpsertCandidateInp
 
   db.prepare(
     `INSERT INTO fanza_candidates
-       (content_id, title, affiliate_url, sample_image_urls, price, list_price, campaign_title, genre_names, review_count, review_average, rank_order, updated_at)
-     VALUES (@content_id, @title, @affiliate_url, @sample_image_urls, @price, @list_price, @campaign_title, @genre_names, @review_count, @review_average, @rank_order, CURRENT_TIMESTAMP)
+       (content_id, title, affiliate_url, sample_image_urls, price, list_price, campaign_title, genre_names, review_count, review_average, rank_order, last_seen_at, updated_at)
+     VALUES (@content_id, @title, @affiliate_url, @sample_image_urls, @price, @list_price, @campaign_title, @genre_names, @review_count, @review_average, @rank_order, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
      ON CONFLICT(content_id) DO UPDATE SET
        title = excluded.title,
        affiliate_url = excluded.affiliate_url,
@@ -65,6 +66,7 @@ export function upsertCandidate(db: Database.Database, input: UpsertCandidateInp
        review_count = excluded.review_count,
        review_average = excluded.review_average,
        rank_order = excluded.rank_order,
+       last_seen_at = CURRENT_TIMESTAMP,
        updated_at = CURRENT_TIMESTAMP`
   ).run({
     content_id: input.content_id,
@@ -116,12 +118,26 @@ export function markAnalysisFailed(db: Database.Database, id: number): void {
   ).run(id);
 }
 
-// selectFanzaCandidate用: 黒塗り要否の解析が完了した候補を、ランクの良い(rank_orderが小さい)順に
-// 全件返す。「黒塗りがほとんど不要か」の判定(ページ単位の間引き・作品ごと除外)はページごとの
+// selectFanzaCandidate用: 黒塗り要否の解析が完了し、かつseenSince以降にfetch-candidatesが観測した
+// (=セールが続いているとみなせる)候補を、ランクの良い(rank_orderが小さい)順に全件返す。
+// last_seen_atがNULL(未観測)の行は比較が偽になるため除外される。seenSinceは"YYYY-MM-DD HH:MM:SS"(UTC)。「黒塗りがほとんど不要か」の判定(ページ単位の間引き・作品ごと除外)はページごとの
 // redaction_detailを見る必要があり、かつ閾値を選定のたびに(再解析なしで)反映したいため、
 // SQL側では絞り込まずfanza/redactionPolicy.tsを使う呼び出し側(selectCandidate.ts)に委ねる。
-export function getAnalyzedCandidatesOrderedByRank(db: Database.Database): FanzaCandidateRow[] {
+export function getAnalyzedCandidatesOrderedByRank(db: Database.Database, seenSince: string): FanzaCandidateRow[] {
   return db
-    .prepare(`SELECT * FROM fanza_candidates WHERE redaction_status = 'analyzed' ORDER BY rank_order ASC`)
-    .all() as FanzaCandidateRow[];
+    .prepare(
+      `SELECT * FROM fanza_candidates
+       WHERE redaction_status = 'analyzed' AND last_seen_at >= ?
+       ORDER BY rank_order ASC`
+    )
+    .all(seenSince) as FanzaCandidateRow[];
+}
+
+// 観測時刻に関係なく、解析済みの候補の総数。fetch-candidatesが止まってプール全体が古くなった状況を
+// 「候補が無い」と区別して警告するために使う。
+export function countAnalyzedCandidates(db: Database.Database): number {
+  const row = db.prepare(`SELECT COUNT(*) AS c FROM fanza_candidates WHERE redaction_status = 'analyzed'`).get() as {
+    c: number;
+  };
+  return row.c;
 }
