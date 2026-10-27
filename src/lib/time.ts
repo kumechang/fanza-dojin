@@ -22,3 +22,9 @@ export function getJstDateString(date: Date): string {
 export function parseDbTimestamp(value: string): Date {
   return new Date(`${value.replace(" ", "T")}Z`);
 }
+
+// parseDbTimestampの逆。DateをSQLiteのCURRENT_TIMESTAMPと同じ "YYYY-MM-DD HH:MM:SS" (UTC)形式にする。
+// 文字列のまま列と大小比較できる(SQLの `last_seen_at >= ?` 等)。
+export function formatDbTimestamp(date: Date): string {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}

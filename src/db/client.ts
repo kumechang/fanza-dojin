@@ -14,7 +14,13 @@ export function getDb(): Database.Database {
   db = new Database(DB_PATH);
   // WALモードは使わない: ワークフローはプロセス終了ごとにdata/app.dbをそのままgitコミットするため、
   // -wal/-shm補助ファイルを残さず単一ファイルで完結させる。
+  ensureSchema(db);
+  return db;
+}
 
+// 既存テーブルへの列追加(ガード付きALTER)と、schema.sqlの適用を行う。
+// 失敗すると全ワークフローがDBを開けなくなるため、インメモリDBでテストできるよう切り出している。
+export function ensureSchema(db: Database.Database): void {
   // CREATE TABLE IF NOT EXISTSは既存テーブルへの列追加はしないため、
   // マルチアカウント対応前から存在するDBに対してはここでガード付きALTERする。
   // schema.sql本体(account_nameを参照するインデックス定義を含む)を適用する前に、
@@ -41,8 +47,20 @@ export function getDb(): Database.Database {
     }
   }
 
+  // fetch-candidatesが最後に観測した時刻(セール終了済みの作品を選定から外すため)。
+  // 既存行はNULL=未観測のまま追加され、次回のfetchで再観測されるまで選定対象外になる。
+  const candidatesTableExists = db
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fanza_candidates'`)
+    .get();
+  if (candidatesTableExists) {
+    const hasLastSeen = db
+      .prepare(`SELECT 1 FROM pragma_table_info('fanza_candidates') WHERE name = 'last_seen_at'`)
+      .get();
+    if (!hasLastSeen) {
+      db.exec(`ALTER TABLE fanza_candidates ADD COLUMN last_seen_at TEXT`);
+    }
+  }
+
   const schema = readFileSync(SCHEMA_PATH, "utf-8");
   db.exec(schema);
-
-  return db;
 }

@@ -46,6 +46,7 @@ function baseConfig(): AppConfig {
       maxAnalysisPerRun: 20,
       maxPageRedactionRatio: 0.3,
       maxUnpostablePageRatio: 0.5,
+      candidateMaxAgeHours: 24,
     },
   };
 }

@@ -48,5 +48,9 @@ export interface AppConfig {
     // 投稿不可ページの割合がこれを超えたら、個別ページを間引くのではなく作品自体を
     // 投稿候補から除外する(0〜1)。
     maxUnpostablePageRatio: number;
+    // fetch-candidatesがこの時間(h)以内に観測していない作品(=セールが終わった可能性が高い)は
+    // 選定対象にしない。fetch-candidatesの実行間隔より十分長くすること(短いとfetchの合間に
+    // 候補が全て期限切れになる)。cronが止まった場合にも古いセール情報で確認依頼が届かないようにする。
+    candidateMaxAgeHours: number;
   };
 }

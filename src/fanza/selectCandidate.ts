@@ -1,9 +1,10 @@
 import type Database from "better-sqlite3";
 import type { AppConfig } from "../config/types.js";
 import { getUsedContentIds, type PostStatus } from "../db/repositories/postsRepo.js";
-import { getAnalyzedCandidatesOrderedByRank } from "../db/repositories/fanzaCandidatesRepo.js";
+import { countAnalyzedCandidates, getAnalyzedCandidatesOrderedByRank } from "../db/repositories/fanzaCandidatesRepo.js";
 import { selectPostablePageIndices, isWorkPostable, type PageRedactionInfo } from "./redactionPolicy.js";
 import { logger } from "../lib/logger.js";
+import { formatDbTimestamp } from "../lib/time.js";
 
 export interface SelectedFanzaCandidate {
   contentId: string;
@@ -38,19 +39,24 @@ export function selectFanzaCandidate(
 }
 
 // 上と同じ条件で、ランクの良い順に最大limit件を選ぶ(Telegramのバッチ確認用)。
+// fetch-candidatesが直近config.fanza.candidateMaxAgeHours以内に観測していない作品は、
+// セールが終わっている可能性が高いため対象外にする(nowは期限判定の基準時刻でテスト用に差し替え可能)。
 export function selectFanzaCandidates(
   db: Database.Database,
   config: AppConfig,
   accountName: string,
-  limit: number
+  limit: number,
+  now: Date = new Date()
 ): SelectedFanzaCandidate[] {
   const selected: SelectedFanzaCandidate[] = [];
   const extraStatuses: PostStatus[] =
     config.approvalMode === "telegram" ? ["pending_approval", "rejected", "post_failed"] : [];
   const usedContentIds = getUsedContentIds(db, accountName, extraStatuses);
-  const { maxPageRedactionRatio, maxUnpostablePageRatio } = config.fanza;
+  const { maxPageRedactionRatio, maxUnpostablePageRatio, candidateMaxAgeHours } = config.fanza;
+  const seenSince = formatDbTimestamp(new Date(now.getTime() - candidateMaxAgeHours * 60 * 60 * 1000));
+  const fresh = getAnalyzedCandidatesOrderedByRank(db, seenSince);
 
-  for (const row of getAnalyzedCandidatesOrderedByRank(db)) {
+  for (const row of fresh) {
     if (usedContentIds.has(row.content_id)) continue;
 
     const detail = (row.redaction_detail ? JSON.parse(row.redaction_detail) : []) as PageRedactionInfo[];
@@ -79,10 +85,19 @@ export function selectFanzaCandidates(
   }
 
   if (selected.length === 0) {
-    logger.info("no eligible pooled FANZA candidate found (pool empty or all rejected by redaction policy)", {
-      maxPageRedactionRatio,
-      maxUnpostablePageRatio,
-    });
+    const analyzedTotal = countAnalyzedCandidates(db);
+    if (fresh.length === 0 && analyzedTotal > 0) {
+      // 候補が尽きたのではなく、プール全体が古い。fetch-candidatesが止まっている可能性が高い。
+      logger.warn("all pooled FANZA candidates are stale (not seen by fetch-candidates recently); is fetch-candidates running?", {
+        analyzedTotal,
+        candidateMaxAgeHours,
+      });
+    } else {
+      logger.info("no eligible pooled FANZA candidate found (pool empty or all rejected by redaction policy)", {
+        maxPageRedactionRatio,
+        maxUnpostablePageRatio,
+      });
+    }
   }
   return selected;
 }
